@@ -202,7 +202,6 @@ try {
   await sleep(200)
   check((await editorText()).startsWith('MF'), 'open as text anyway shows the bytes in the editor')
 
-  console.log('▶ new documents: choose the type')
   const syntaxLabel = () => page.textContent('.statusbar .status-syntax')
   const nameEnds = (ext) =>
     page.waitForFunction((x) => document.querySelector('.tab.active .tab-name')?.textContent.endsWith(x), ext, { timeout: 5000 })
@@ -211,9 +210,32 @@ try {
     await page.waitForSelector('.context-menu')
     await page.locator('.context-menu .context-menu-item', { hasText: label }).first().click()
   }
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
+  console.log('▶ new documents: the type follows the content')
   await send('new-file')
   await nameEnds('.md')
-  check((await syntaxLabel()) === 'Markdown', 'a new document starts as Markdown')
+  check(/^Markdown\s*[（(](自动|Auto)[）)]$/.test(await syntaxLabel()), 'a new document starts as Markdown, detected automatically')
+  await page.click('.pane-editor .cm-content')
+  await page.keyboard.insertText('SELECT id, name\nFROM users\nWHERE id = 1;')
+  await nameEnds('.sql')
+  check(/^SQL\s*[（(](自动|Auto)[）)]$/.test(await syntaxLabel()), `pasted SQL → ${await syntaxLabel()}`)
+  await page.keyboard.press(`${mod}+A`)
+  await page.keyboard.press('Backspace')
+  await nameEnds('.md')
+  check(true, 'emptied again → back to Markdown')
+  await pickType('JSON')
+  await nameEnds('.json')
+  await page.click('.pane-editor .cm-content')
+  await page.keyboard.insertText('SELECT 1 FROM dual;')
+  await sleep(700)
+  check((await syntaxLabel()) === 'JSON', 'a type picked by hand stays')
+  await pickType(/自动检测|Auto Detect/)
+  await nameEnds('.sql')
+  check(true, 'Auto Detect picks it up again')
+
+  console.log('▶ new documents: choose the type')
+  await send('new-file')
+  await nameEnds('.md')
   await page.click('.pane-editor .cm-content')
   // Markdown closes the tag by itself, as HTML does.
   await page.keyboard.type('<h1 class="title">hello')
@@ -243,8 +265,7 @@ try {
   await nameEnds('.md')
   await page.waitForSelector('.editor-toolbar')
   check(true, 'back to Markdown: toolbar returns')
-  await page.locator('.statusbar .status-syntax').click()
-  await page.locator('.context-menu .context-menu-item').first().click()
+  await pickType(/纯文本|Plain Text/)
   await nameEnds('.txt')
   check(/^(纯文本|Plain Text)$/.test(await syntaxLabel()), 'plain text → .txt')
   await page.keyboard.type('\n#!/bin/sh')
@@ -256,7 +277,10 @@ try {
   await pickType(/其他类型|Other Types/)
   await page.waitForSelector('.palette input')
   const firstRows = await page.$$eval('.palette .qo-item .qo-label', (els) => els.slice(0, 3).map((e) => e.textContent))
-  check(/纯文本|Plain Text/.test(firstRows[0]) && firstRows[1].includes('Markdown'), `other types list starts with the common ones: ${firstRows.join(' / ')}`)
+  check(
+    /自动检测|Auto Detect/.test(firstRows[0]) && /纯文本|Plain Text/.test(firstRows[1]) && firstRows[2].includes('Markdown'),
+    `other types list starts with Auto Detect and the common ones: ${firstRows.join(' / ')}`
+  )
   await shot('54-new-document-other-types')
   await page.keyboard.type('rust')
   await page.waitForFunction(() => document.querySelector('.palette .qo-item.active .qo-label')?.textContent.includes('Rust'))

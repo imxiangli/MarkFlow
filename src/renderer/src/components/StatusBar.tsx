@@ -1,5 +1,5 @@
 import { useDeferredValue, useMemo } from 'react'
-import { reopenWithEncoding, saveWithEncoding, setDocumentType, setLineEnding } from '@/actions'
+import { reopenWithEncoding, saveWithEncoding, setDocumentType, setDocumentTypeAuto, setLineEnding } from '@/actions'
 import { COMMON_TYPES, PLAIN_TEXT, documentType, tabLanguage } from '@/editor/languages'
 import { formatSize } from '@/lib/fileTypes'
 import { t as translate, useT } from '@/lib/i18n'
@@ -32,9 +32,15 @@ const typeLabel = (type: string): string => (type === PLAIN_TEXT ? translate('st
 
 /** What a new document is: the common types, and the palette for all the others. */
 function typeMenu(e: React.MouseEvent, tab: Tab, current: string): void {
+  const auto = !!tab.autoType
   openContextMenu(e, [
+    {
+      label: `${auto ? '✓ ' : ' '}${translate('cmd.syntaxAuto')}`,
+      onClick: () => setDocumentTypeAuto(tab.id)
+    },
+    { separator: true },
     ...COMMON_TYPES.map((type) => ({
-      label: `${type === current ? '✓ ' : ' '}${typeLabel(type)}`,
+      label: `${!auto && type === current ? '✓ ' : ' '}${typeLabel(type)}`,
       onClick: () => setDocumentType(tab.id, type)
     })),
     { separator: true },
@@ -149,10 +155,12 @@ export function StatusBar() {
           {isNewDocument(tab) ? (
             <button
               className="status-btn status-syntax"
-              title={t('status.typeTip')}
+              title={t(tab.autoType ? 'status.typeAutoTip' : 'status.typeTip')}
               onClick={(e) => typeMenu(e, tab, documentType(tab, content))}
             >
-              {typeLabel(documentType(tab, content))}
+              {tab.autoType
+                ? t('status.typeAuto', { name: typeLabel(documentType(tab, content)) })
+                : typeLabel(documentType(tab, content))}
             </button>
           ) : tab.kind === 'markdown' && !tab.large ? (
             <span>Markdown</span>

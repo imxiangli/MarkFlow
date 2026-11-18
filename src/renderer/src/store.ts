@@ -38,6 +38,8 @@ export interface Tab {
   dirty?: boolean
   /** Syntax chosen by the user for a text tab ('plain' = none); detected from the name otherwise. */
   language?: string
+  /** New document whose type follows its content (pasting SQL makes it SQL) until the user picks one. */
+  autoType?: boolean
 }
 
 export type SidebarPanel = 'files' | 'outline' | 'search'

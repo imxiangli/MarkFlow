@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Clock, Code, Command, Hash, Heading, ListOrdered } from 'lucide-react'
-import { flattenTree, openFile, requestReveal, runMenuCommand, setDocumentType, setTabLanguage } from '@/actions'
+import { flattenTree, openFile, requestReveal, runMenuCommand, setDocumentType, setDocumentTypeAuto, setTabLanguage } from '@/actions'
 import { editorBridge } from '@/editor/bridge'
 import { DOCUMENT_TYPES, PLAIN_TEXT, SYNTAXES, documentType, typeExtension } from '@/editor/languages'
 import { useT } from '@/lib/i18n'
@@ -148,10 +148,14 @@ function PaletteBody({ initial }: { initial: string }) {
         // Only the part after the prefix filters, so the list keeps its order until you type.
         const filter = syntaxFirst ? q.slice(prefix.length).trim() : q
         if (syntaxTab && newDoc) {
-          const current = documentType(syntaxTab, syntaxTab.content)
-          const choices = DOCUMENT_TYPES.map((type) => ({ type, name: type === PLAIN_TEXT ? t('status.plainText') : type }))
+          // '' = follow the content (see setDocumentTypeAuto).
+          const current = syntaxTab.autoType ? '' : documentType(syntaxTab, syntaxTab.content)
+          const choices = [
+            { type: '', name: t('cmd.syntaxAuto') },
+            ...DOCUMENT_TYPES.map((type) => ({ type, name: type === PLAIN_TEXT ? t('status.plainText') : type }))
+          ]
           for (const c of rank(choices, filter, (x) => setLabel(x.name), 200)) {
-            const ext = typeExtension(c.type)
+            const ext = c.type && typeExtension(c.type)
             syntaxRows.push({
               key: `type:${c.type}`,
               icon: <Code size={14} />,
@@ -160,7 +164,8 @@ function PaletteBody({ initial }: { initial: string }) {
               badge: c.type === current ? '✓' : undefined,
               run: () => {
                 close()
-                setDocumentType(syntaxTab.id, c.type)
+                if (c.type) setDocumentType(syntaxTab.id, c.type)
+                else setDocumentTypeAuto(syntaxTab.id)
               }
             })
           }

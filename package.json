@@ -20,6 +20,7 @@
     "test:watch": "node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/watcher.test.ts",
     "test:paste": "node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/paste.test.ts",
     "test:largefile": "node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/largefile.test.ts",
+    "test:type": "node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/contentType.test.ts",
     "test:e2e": "npm run build && node tests/e2e.mjs",
     "test:update": "node tests/update-e2e.mjs",
     "test:recovery": "node tests/recovery-e2e.mjs",

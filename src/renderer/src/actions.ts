@@ -7,7 +7,8 @@ import { redo, undo } from '@codemirror/commands'
 import { editorBridge } from '@/editor/bridge'
 import type { FormatCommand } from '@/editor/commands'
 import { editorCommand } from '@/editor/keymap'
-import { MARKDOWN_TYPE, languageAfterSave, nameForType } from '@/editor/languages'
+import { MARKDOWN_TYPE, documentType, languageAfterSave, nameForType } from '@/editor/languages'
+import { detectContentType } from '@/editor/contentType'
 import { bookmarkLines, gotoBookmark, openReplace, toggleBookmark, toggleSearchOption, seedFindFromSelection } from '@/editor/sublime'
 import { jumpBack, jumpForward, recordJump, setLocationProvider, type NavLocation } from '@/lib/navHistory'
 import { previewTopLine } from '@/lib/scrollSync'
@@ -259,7 +260,7 @@ export function newUntitled(
   content = '',
   name?: string,
   builtin = false,
-  type: Pick<Tab, 'kind' | 'language'> = { kind: 'markdown' }
+  type: Pick<Tab, 'kind' | 'language' | 'autoType'> = { kind: 'markdown' }
 ): Tab {
   // Keep numbering past restored "Untitled-N" documents, whatever their type.
   const n = name ? /-(\d+)(?:\.[^.]*)?$/.exec(name) : null
@@ -281,7 +282,8 @@ export function newUntitled(
 }
 
 export function newFile(): void {
-  newUntitled()
+  // Starts as Markdown, but its type follows what's typed or pasted until one is chosen.
+  newUntitled('', undefined, false, { kind: 'markdown', autoType: true })
   const s = getState()
   if (s.viewMode === 'preview') setViewMode(s.lastEditMode)
   setTimeout(() => editorBridge.focus(), 50)
@@ -307,6 +309,7 @@ export function updateContent(id: string, content: string): void {
   if (!tab || tab.content === content) return
   updateTab(id, { content })
   scheduleAutoSave(id)
+  if (tab.autoType) scheduleTypeDetection(id)
 }
 
 const autoSaveTimers = new Map<string, number>()
@@ -717,16 +720,58 @@ export function setDocumentType(id: string, type: string): void {
   flushPendingEdits()
   const tab = getState().tabs.find((x) => x.id === id)
   if (!tab || !isNewDocument(tab)) return
+  // A type picked by hand stays, whatever is typed next.
+  applyDocumentType(tab, type, { autoType: false })
+  setTimeout(() => editorBridge.focus(), 50)
+}
+
+/** Let a new document's type follow its content again (and detect it now). */
+export function setDocumentTypeAuto(id: string): void {
+  flushPendingEdits()
+  const tab = getState().tabs.find((x) => x.id === id)
+  if (!tab || !isNewDocument(tab)) return
+  updateTab(id, { autoType: true })
+  detectDocumentType(id)
+  setTimeout(() => editorBridge.focus(), 50)
+}
+
+function applyDocumentType(tab: Tab, type: string, extra: Partial<Tab> = {}): void {
   const markdown = type === MARKDOWN_TYPE
-  updateTab(id, {
+  updateTab(tab.id, {
     name: nameForType(tab.name, type),
     kind: markdown ? 'markdown' : 'text',
-    language: markdown ? undefined : type
+    language: markdown ? undefined : type,
+    ...extra
   })
   const s = getState()
   // Like a freshly created Markdown document, it opens for writing.
   if (markdown && s.viewMode === 'preview') setViewMode(s.lastEditMode)
-  setTimeout(() => editorBridge.focus(), 50)
+}
+
+/** Waits for a pause in typing so the type doesn't flicker while a word is half written. */
+const TYPE_DETECT_DELAY = 400
+const typeDetectTimers = new Map<string, number>()
+function scheduleTypeDetection(id: string): void {
+  clearTimeout(typeDetectTimers.get(id))
+  typeDetectTimers.set(
+    id,
+    window.setTimeout(() => {
+      typeDetectTimers.delete(id)
+      detectDocumentType(id)
+    }, TYPE_DETECT_DELAY)
+  )
+}
+
+/** Give an auto-typed new document the type its text looks like (Markdown for prose). */
+function detectDocumentType(id: string): void {
+  const tab = getState().tabs.find((x) => x.id === id)
+  if (!tab?.autoType || !isNewDocument(tab) || tab.large) return
+  const type = detectContentType(tab.content) ?? MARKDOWN_TYPE
+  if (type === documentType(tab, tab.content)) return
+  const hadFocus = tab.id === getState().activeId && !!editorBridge.view?.hasFocus
+  applyDocumentType(tab, type)
+  // Switching between Markdown and code re-attaches the editor; keep typing where you were.
+  if (hadFocus) setTimeout(() => editorBridge.focus(), 0)
 }
 
 /* ------------------------------------------------------------------ */
