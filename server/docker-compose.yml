@@ -1,0 +1,32 @@
+# MarkFlow update server: Caddy serving ./data with automatic HTTPS.
+#
+#   cd server
+#   MARKFLOW_SITE=updates.example.com docker compose up -d     # production (needs DNS → this host, ports 80/443 open)
+#   MARKFLOW_SITE=:80 MARKFLOW_HTTP_PORT=8088 docker compose up -d   # local test: http://localhost:8088/markflow/
+#
+# Publish updates into ./data with: node scripts/deploy-update.mjs server/data
+services:
+  markflow-update:
+    image: caddy:2-alpine
+    container_name: markflow-update
+    restart: unless-stopped
+    environment:
+      MARKFLOW_SITE: ${MARKFLOW_SITE:-:80}
+    ports:
+      - "${MARKFLOW_HTTP_PORT:-80}:80"
+      - "${MARKFLOW_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data:/srv/markflow:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      # Caddy's local admin endpoint works in both HTTP and automatic-HTTPS mode.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  caddy_data:
+  caddy_config:

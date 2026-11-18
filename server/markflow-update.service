@@ -1,0 +1,24 @@
+# systemd unit for the zero-dependency Node update server (alternative to Docker/Caddy).
+# Install:
+#   sudo cp server/update-server.mjs /opt/markflow-update/
+#   sudo cp server/markflow-update.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now markflow-update
+# Put Caddy or nginx in front of it for HTTPS.
+
+[Unit]
+Description=MarkFlow update feed
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+ExecStart=/usr/bin/node /opt/markflow-update/update-server.mjs --root /srv/markflow --host 127.0.0.1 --port 8080 --prefix /markflow/
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadOnlyPaths=/srv/markflow
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,121 @@
+appId: com.markflow.app
+productName: MarkFlow
+copyright: Copyright © 2026 MarkFlow
+directories:
+  buildResources: build
+  output: release/${version}
+files:
+  - out/**
+  - resources/**
+  - package.json
+  - '!**/*.map'
+npmRebuild: false
+asar: true
+
+# Registers MarkFlow as an "Open With" handler for Markdown files
+# (Windows registry / ProgID, Linux .desktop MimeType, macOS CFBundleDocumentTypes).
+fileAssociations:
+  - ext: [md, markdown, mdown, mkd, mkdn, mdwn, mdtxt, mdtext]
+    name: Markdown
+    description: Markdown Document
+    mimeType: text/markdown
+    role: Editor
+    rank: Default
+    icon: icon
+  - ext: [mdx, rmd, qmd]
+    name: Markdown Variant
+    description: Markdown Document
+    role: Editor
+    rank: Alternate
+    icon: icon
+
+mac:
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  category: public.app-category.productivity
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  darkModeSupport: true
+  extendInfo:
+    # macOS: merged with the entries generated from fileAssociations above.
+    # Adds a UTI-based Markdown claim and lets folders be dropped on the Dock icon.
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: Markdown Document
+        CFBundleTypeRole: Editor
+        LSHandlerRank: Default
+        CFBundleTypeIconFile: icon.icns
+        LSItemContentTypes: [net.daringfireball.markdown]
+      # Any text / source file: listed under "Open With", never made the default.
+      - CFBundleTypeName: Text Document
+        CFBundleTypeRole: Editor
+        LSHandlerRank: Alternate
+        LSItemContentTypes: [public.text, public.source-code, public.script, public.json, public.xml, public.yaml]
+      - CFBundleTypeName: Folder
+        CFBundleTypeRole: Viewer
+        LSHandlerRank: Alternate
+        LSItemContentTypes: [public.folder]
+    UTImportedTypeDeclarations:
+      - UTTypeIdentifier: net.daringfireball.markdown
+        UTTypeDescription: Markdown Document
+        UTTypeConformsTo: [public.plain-text]
+        UTTypeIconFile: icon.icns
+        UTTypeReferenceURL: https://daringfireball.net/projects/markdown/
+        UTTypeTagSpecification:
+          public.filename-extension: [md, markdown, mdown, mkd, mkdn, mdwn]
+          public.mime-type: [text/markdown, text/x-markdown]
+dmg:
+  writeUpdateInfo: false
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64]
+  artifactName: ${productName}-${version}-win-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: MarkFlow
+  artifactName: ${productName}-Setup-${version}-${arch}.${ext}
+  # Adds "Open with MarkFlow" to the folder and file context menus in Explorer.
+  include: build/installer.nsh
+
+linux:
+  executableName: markflow
+  icon: build/icons
+  category: Office;TextEditor;Utility
+  maintainer: MarkFlow
+  synopsis: Markdown reader & editor
+  description: A cross-platform Markdown reader and editor with folder workspace, live preview, math and diagrams.
+  # Markdown first; the rest only make MarkFlow available in "Open With" for text and code files.
+  mimeTypes:
+    [
+      text/markdown,
+      text/x-markdown,
+      text/plain,
+      application/json,
+      application/xml,
+      application/x-yaml,
+      text/x-python,
+      text/x-shellscript,
+      application/javascript,
+      text/css,
+      text/csv
+    ]
+  target:
+    - AppImage
+    - deb
+    - tar.gz
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+  desktop:
+    entry:
+      StartupWMClass: MarkFlow
+      Keywords: markdown;md;editor;notes;

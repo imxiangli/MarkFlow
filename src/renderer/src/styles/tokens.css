@@ -1,0 +1,148 @@
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI',
+    'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Noto Sans', Ubuntu, Cantarell, Helvetica, Arial, sans-serif;
+  --font-reading: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Noto Sans CJK SC', 'Source Han Sans SC', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-mono: 'SF Mono', SFMono-Regular, ui-monospace, 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, 'Liberation Mono',
+    'DejaVu Sans Mono', monospace;
+  --font-editor: 'SF Mono', SFMono-Regular, ui-monospace, 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, 'PingFang SC',
+    'Microsoft YaHei', 'Noto Sans Mono CJK SC', monospace;
+
+  --bg: #ffffff;
+  --bg-elevated: #ffffff;
+  --sidebar-bg: #f6f7f9;
+  --titlebar-bg: #eff1f4;
+  --panel-bg: #ffffff;
+  --border: #e3e6ea;
+  --border-strong: #cfd4db;
+  --text: #1f2328;
+  --text-muted: #59636e;
+  --text-faint: #8f98a3;
+  --accent: #3d6df2;
+  --accent-text: #ffffff;
+  --accent-soft: rgba(61, 109, 242, 0.12);
+  --hover: rgba(15, 23, 42, 0.055);
+  --active: rgba(61, 109, 242, 0.12);
+  --danger: #d1242f;
+  --success: #1a7f37;
+  --warning: #9a6700;
+  --shadow: 0 10px 30px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.08);
+
+  --editor-bg: #ffffff;
+  --editor-active-line: rgba(15, 23, 42, 0.03);
+  --editor-selection: rgba(61, 109, 242, 0.2);
+  --editor-match: rgba(250, 204, 21, 0.25);
+  --find-match: rgba(250, 204, 21, 0.42);
+  --find-match-border: rgba(202, 138, 4, 0.55);
+  --find-current: #ff9632;
+  --find-current-text: #1a1a1a;
+  --find-current-ring: rgba(255, 150, 50, 0.32);
+
+  --cm-heading: #0b1a33;
+  --cm-link: #0b63ce;
+  --cm-quote: #5d6875;
+  --cm-code: #b5306a;
+  --cm-meta: #8a63d2;
+  --cm-list: #c2410c;
+  --cm-comment: #8a94a0;
+  --cm-keyword: #cf222e;
+  --cm-string: #0a3069;
+  --cm-number: #0550ae;
+  --cm-function: #8250df;
+  --cm-type: #953800;
+  --cm-property: #116329;
+  --cm-tag: #116329;
+  --cm-invalid: #d1242f;
+
+  --md-text: #1f2328;
+  --md-heading: #111418;
+  --md-muted: #59636e;
+  --md-link: #0b63ce;
+  --md-border: #d8dee4;
+  --md-code-bg: rgba(129, 139, 152, 0.14);
+  --md-code-text: #c0256b;
+  --md-pre-bg: #f6f8fa;
+  --md-quote-border: #d0d7de;
+  --md-table-head: #f6f8fa;
+  --md-table-stripe: #fafbfc;
+  --md-mark-bg: #fff3a3;
+  --md-mark-text: inherit;
+  --md-kbd-bg: #f6f8fa;
+  --md-toc-bg: #f8f9fb;
+  --md-note: #0969da;
+  --md-tip: #1a7f37;
+  --md-important: #8250df;
+  --md-warning: #9a6700;
+  --md-caution: #cf222e;
+  --md-info: #0e7490;
+}
+
+:root[data-theme='dark'] {
+  --bg: #1d1e21;
+  --bg-elevated: #26272b;
+  --sidebar-bg: #18191c;
+  --titlebar-bg: #141518;
+  --panel-bg: #25262a;
+  --border: #2d2f34;
+  --border-strong: #3c3f46;
+  --text: #e3e5e8;
+  --text-muted: #a1a7b0;
+  --text-faint: #6c727c;
+  --accent: #6f95ff;
+  --accent-text: #0b1020;
+  --accent-soft: rgba(111, 149, 255, 0.16);
+  --hover: rgba(255, 255, 255, 0.06);
+  --active: rgba(111, 149, 255, 0.18);
+  --danger: #f47067;
+  --success: #57ab5a;
+  --warning: #c69026;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+
+  --editor-bg: #1d1e21;
+  --editor-active-line: rgba(255, 255, 255, 0.035);
+  --editor-selection: rgba(111, 149, 255, 0.28);
+  --editor-match: rgba(250, 204, 21, 0.18);
+  --find-match: rgba(250, 204, 21, 0.3);
+  --find-match-border: rgba(250, 204, 21, 0.5);
+  --find-current: #ff9632;
+  --find-current-text: #1a1a1a;
+  --find-current-ring: rgba(255, 150, 50, 0.38);
+
+  --cm-heading: #f0f2f5;
+  --cm-link: #6cb6ff;
+  --cm-quote: #9ba3ad;
+  --cm-code: #f38ba8;
+  --cm-meta: #b392f0;
+  --cm-list: #f69d50;
+  --cm-comment: #768390;
+  --cm-keyword: #f47067;
+  --cm-string: #96d0ff;
+  --cm-number: #6cb6ff;
+  --cm-function: #dcbdfb;
+  --cm-type: #f69d50;
+  --cm-property: #8ddb8c;
+  --cm-tag: #8ddb8c;
+  --cm-invalid: #f47067;
+
+  --md-text: #dfe2e6;
+  --md-heading: #f3f4f6;
+  --md-muted: #a1a7b0;
+  --md-link: #6cb6ff;
+  --md-border: #373b42;
+  --md-code-bg: rgba(110, 118, 129, 0.3);
+  --md-code-text: #f38ba8;
+  --md-pre-bg: #16171a;
+  --md-quote-border: #444c56;
+  --md-table-head: #24262b;
+  --md-table-stripe: #212226;
+  --md-mark-bg: #6b5b10;
+  --md-mark-text: #fff6c8;
+  --md-kbd-bg: #2a2c31;
+  --md-toc-bg: #222327;
+  --md-note: #539bf5;
+  --md-tip: #57ab5a;
+  --md-important: #986ee2;
+  --md-warning: #c69026;
+  --md-caution: #e5534b;
+  --md-info: #39c5cf;
+}

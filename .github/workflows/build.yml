@@ -1,0 +1,72 @@
+name: Build installers
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: --mac
+          - os: windows-latest
+            target: --win
+          - os: ubuntu-latest
+            target: --linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:md
+      - run: npm run build
+      - run: npx electron-builder ${{ matrix.target }} --publish never
+        env:
+          # Set CSC_LINK / CSC_KEY_PASSWORD (and APPLE_ID… for notarisation) as secrets to sign.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: markflow-${{ runner.os }}
+          path: |
+            release/*/*.dmg
+            release/*/*.zip
+            release/*/*.exe
+            release/*/*.AppImage
+            release/*/*.deb
+            release/*/*.tar.gz
+          if-no-files-found: error
+
+  # Builds the incremental-update folder (signed latest.json + content-addressed files +
+  # the installers above). Upload the resulting artifact to the host behind
+  # "markflow.updateUrl". Requires the MARKFLOW_UPDATE_KEY secret (contents of
+  # keys/update-private.pem).
+  update-feed:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - run: node scripts/release-update.mjs --full-dir installers --out update-feed
+        env:
+          MARKFLOW_UPDATE_KEY: ${{ secrets.MARKFLOW_UPDATE_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: markflow-update-feed
+          path: update-feed
