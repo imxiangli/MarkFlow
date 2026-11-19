@@ -1,7 +1,7 @@
 {
   "name": "markflow",
   "productName": "MarkFlow",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A cross-platform Markdown reader & editor with folder workspace, live preview, math, diagrams and more.",
   "main": "./out/main/bootstrap.js",
   "author": {
