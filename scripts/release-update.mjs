@@ -17,22 +17,24 @@
  *   --skip-key-check   allow a key that does not match src/main/update-public-key.ts (testing)
  *
  * GitHub Releases (see .github/workflows/build.yml):
- *   --github <owner/repo>  write latest.json, latest.json.sig and the new <sha256>.gz blobs into
- *                          --out, to be uploaded as assets of the release tagged --tag. Every
- *                          URL in the manifest is absolute; installers are expected to be
- *                          uploaded to the same release under their own names.
+ *   --github <owner/repo>  write latest.json and latest.json.sig into --out, to be uploaded to the
+ *                          release tagged --tag next to the installers, and the app files that
+ *                          are new into --out/files/, to be uploaded to the release --files-tag.
+ *                          Every URL in the manifest is absolute.
  *   --tag <tag>            release tag (default: v<version>)
- *   --previous <file>      latest.json of the previous release: blobs it already has are
- *                          referenced from there instead of being uploaded again
+ *   --files-tag <tag>      prerelease holding the app files of every version, so the version
+ *                          releases only list installers (default: update-files)
+ *   --existing <file>      asset names already in --files-tag, one per line: not written again
+ *   --previous <file>      latest.json of the previous release, to report the update size
  *
- * Signing key: $MARKFLOW_UPDATE_KEY (PEM text) or keys/update-private.pem
- * (create one with `node scripts/update-keygen.mjs`).
+ * Signing key: see scripts/update-signing.mjs.
  */
-import { createHash, createPrivateKey, createPublicKey, sign, verify } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
+import { signManifest, signingKey as loadKey } from './update-signing.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
@@ -54,50 +56,21 @@ const outDir = resolve(opt('out', join(root, github ? `release/github/${version}
 const fullDir = resolve(opt('full-dir', join(root, 'release', version)))
 const notes = opt('notes-file') ? readFileSync(opt('notes-file'), 'utf8') : opt('notes', undefined)
 const tag = opt('tag', `v${version}`)
-const assetUrl = (name) => `https://github.com/${github}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(name)}`
+const filesTag = opt('files-tag', 'update-files')
+const releaseUrl = (t, name) => `https://github.com/${github}/releases/download/${encodeURIComponent(t)}/${encodeURIComponent(name)}`
+const assetUrl = (name) => releaseUrl(tag, name)
+const existing = new Set(
+  opt('existing')
+    ? readFileSync(opt('existing'), 'utf8')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean)
+    : []
+)
 const electron = opt('electron', JSON.parse(readFileSync(join(root, 'node_modules/electron/package.json'), 'utf8')).version)
 const bootstrapApi = Number(/BOOTSTRAP_API = (\d+)/.exec(readFileSync(join(root, 'src/bootstrap/index.ts'), 'utf8'))[1])
 
-const keyPem = process.env.MARKFLOW_UPDATE_KEY || (existsSync(join(root, 'keys/update-private.pem')) ? readFileSync(join(root, 'keys/update-private.pem'), 'utf8') : null)
-if (!keyPem) {
-  console.error('No signing key: set MARKFLOW_UPDATE_KEY or run `node scripts/update-keygen.mjs`.')
-  process.exit(1)
-}
-const signingKey = loadSigningKey(keyPem)
-
-/**
- * Reads the Ed25519 private key, tolerating the ways a PEM gets mangled when pasted into a CI
- * secret: surrounding quotes, CRLF or literal "\n", line breaks lost, header lines missing
- * (bare base64 PKCS#8), or just the raw 32-byte seed in base64. Never prints key material.
- */
-function loadSigningKey(text) {
-  let t = text.trim().replace(/^(['"])([\s\S]*)\1$/, '$2').replace(/\\n/g, '\n').replace(/\r/g, '').trim()
-  const wrap = (label, b64) => `-----BEGIN ${label}-----\n${b64.match(/.{1,64}/g).join('\n')}\n-----END ${label}-----\n`
-  const pem = /-----BEGIN ([A-Z0-9 ]+)-----([\s\S]*?)-----END \1-----/.exec(t)
-  if (pem) {
-    t = wrap(pem[1], pem[2].replace(/\s+/g, ''))
-  } else if (/^[A-Za-z0-9+/=\s]+$/.test(t)) {
-    const der = Buffer.from(t.replace(/\s+/g, ''), 'base64')
-    // A bare 32-byte seed: prefix it with the fixed PKCS#8 header for Ed25519.
-    const pkcs8 = der.length === 32 ? Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), der]) : der
-    t = wrap('PRIVATE KEY', pkcs8.toString('base64'))
-  }
-  try {
-    const key = createPrivateKey(t)
-    if (key.asymmetricKeyType !== 'ed25519') throw new Error(`${key.asymmetricKeyType} key, expected ed25519`)
-    return key
-  } catch (err) {
-    const what = pem
-      ? `a PEM block labelled "${pem[1]}"`
-      : t.includes('-----BEGIN')
-        ? 'a PEM header without a matching END line'
-        : `${text.trim().length} characters that are neither PEM nor base64`
-    console.error(`The signing key could not be read (${err.message}). It contains ${what}.`)
-    if (pem && /PUBLIC/.test(pem[1])) console.error('That is the public key; the secret needs the private half (keys/update-private.pem).')
-    if (pem && /OPENSSH|RSA|EC /.test(pem[1])) console.error('Expected the Ed25519 PKCS#8 key from `npm run update:keygen` ("-----BEGIN PRIVATE KEY-----").')
-    process.exit(1)
-  }
-}
+const signingKey = loadKey()
 if (!existsSync(join(src, 'out/main/index.js'))) {
   console.error(`${src}/out is missing — run \`npm run build\` first.`)
   process.exit(1)
@@ -125,12 +98,10 @@ function sha512File(path) {
   })
 }
 
-// GitHub assets are flat; a web host keeps blobs under files/.
-const filesDir = github ? outDir : join(outDir, 'files')
+const filesDir = join(outDir, 'files')
 mkdirSync(filesDir, { recursive: true })
 
-// Previous manifest, to report how much an existing install has to download
-// (and, for GitHub, to reuse blobs uploaded with earlier releases).
+// Previous manifest, to report how much an existing install has to download.
 let previous = null
 try {
   const previousPath = opt('previous', github ? null : join(outDir, 'latest.json'))
@@ -139,14 +110,6 @@ try {
 } catch {
   previous = null
 }
-const ownAssets = `https://github.com/${github}/releases/download/${encodeURIComponent(tag)}/`
-const previousBlobs = new Map(
-  github && previous
-    ? previous.files
-        .filter((f) => typeof f.url === 'string' && f.url.startsWith(`https://github.com/${github}/releases/download/`) && !f.url.startsWith(ownAssets))
-        .map((f) => [f.sha256, f])
-    : []
-)
 
 // 1. App files → content-addressed gzip blobs.
 const files = []
@@ -155,23 +118,21 @@ for (const abs of [...walk(join(src, 'out')), ...walk(join(src, 'resources'))]) 
   const data = readFileSync(abs)
   const hash = sha256(data)
   const path = relative(src, abs).split(sep).join('/')
-  const reused = previousBlobs.get(hash)
-  if (reused) {
-    files.push({ path, sha256: hash, size: data.length, gzSize: reused.gzSize, url: reused.url })
-    continue
+  const name = `${hash}.gz`
+  const blob = join(filesDir, name)
+  let gzSize
+  if (existsSync(blob)) {
+    gzSize = statSync(blob).size
+  } else {
+    const gz = gzipSync(data, { level: 9 })
+    gzSize = gz.length
+    // Already uploaded to the files release: only its size is needed for the manifest.
+    if (!existing.has(name)) {
+      writeFileSync(blob, gz)
+      newBlobs++
+    }
   }
-  const blob = join(filesDir, `${hash}.gz`)
-  if (!existsSync(blob)) {
-    writeFileSync(blob, gzipSync(data, { level: 9 }))
-    newBlobs++
-  }
-  files.push({
-    path,
-    sha256: hash,
-    size: data.length,
-    gzSize: statSync(blob).size,
-    ...(github ? { url: assetUrl(`${hash}.gz`) } : {})
-  })
+  files.push({ path, sha256: hash, size: data.length, gzSize, ...(github ? { url: releaseUrl(filesTag, name) } : {}) })
 }
 files.sort((a, b) => a.path.localeCompare(b.path))
 
@@ -225,16 +186,8 @@ const manifest = {
   ...(Object.keys(full).length ? { full } : {})
 }
 const raw = Buffer.from(JSON.stringify(manifest, null, 2) + '\n')
-const signature = sign(null, raw, signingKey).toString('base64')
 // Clients only trust src/main/update-public-key.ts: refuse to publish what they would reject.
-const publicPem = /`(-----BEGIN PUBLIC KEY-----[\s\S]+?-----END PUBLIC KEY-----)`/.exec(
-  readFileSync(join(root, 'src/main/update-public-key.ts'), 'utf8')
-)?.[1]
-if (!flag('skip-key-check') && (!publicPem || !verify(null, raw, createPublicKey(publicPem), Buffer.from(signature, 'base64')))) {
-  console.error('The signing key does not match src/main/update-public-key.ts — installed apps would reject this update.')
-  console.error('Use the private key generated with that public key, or run `npm run update:keygen -- --force` and ship new installers.')
-  process.exit(1)
-}
+const signature = signManifest(raw, signingKey, { skipKeyCheck: flag('skip-key-check') })
 writeFileSync(join(outDir, 'latest.json'), raw)
 writeFileSync(join(outDir, 'latest.json.sig'), signature + '\n')
 if (!github) {
@@ -261,8 +214,8 @@ if (previous) {
 }
 for (const [key, p] of Object.entries(full)) console.log(`  full ${key}: ${p.name} (${mb(p.size)})`)
 if (github) {
-  console.log(`  ${previousBlobs.size ? `${files.filter((f) => !f.url.startsWith(ownAssets)).length} files reuse blobs of earlier releases` : 'no previous release: every blob is uploaded'}`)
-  console.log(`Upload everything in ${outDir} (plus the installers) to the release ${github}@${tag}.`)
+  console.log(`  ${files.length - newBlobs} files already in ${filesTag}; upload ${outDir}/files/* there (${newBlobs} files)`)
+  console.log(`Then upload latest.json, latest.json.sig and the installers to ${github}@${tag}.`)
 } else {
   console.log('Upload the whole folder to the URL configured as "markflow.updateUrl" in package.json.')
 }

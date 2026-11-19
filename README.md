@@ -128,7 +128,7 @@ npm run dist:linux   # AppImage + deb + tar.gz
 **工作原理**
 
 - `src/bootstrap/` 是安装包里唯一不会被热更新替换的引导程序。启动时它检查 `<用户数据>/updates/state.json`，如果有更新、兼容且没被标记为失败的版本，就加载 `updates/<版本>/out/main/index.js`，否则加载安装包自带的代码。
-- 更新器（`src/main/updater.ts`）每 6 小时读取一次 `releases/latest/download/latest.json`，并用内置的 Ed25519 公钥校验签名（签名从对应版本的标签 `releases/download/v<版本>/latest.json.sig` 读取）。然后逐个文件比对哈希：本地已有的文件直接复制，其余文件从清单里记录的 Release 附件地址下载。全部解压并校验后，才原子地切换到新版本，下次启动生效（也可以点"重启并更新"）。
+- 更新器（`src/main/updater.ts`）每 6 小时读取一次 `releases/latest/download/latest.json`，并用内置的 Ed25519 公钥校验签名（签名从对应版本的标签 `releases/download/v<版本>/latest.json.sig` 读取）。然后逐个文件比对哈希：本地已有的文件直接复制，其余文件从清单里记录的地址下载（预发布 `update-files` 的附件）。全部解压并校验后，才原子地切换到新版本，下次启动生效（也可以点"重启并更新"）。
 - **回滚保护**：新版本加载时出错，或连续两次没能完成启动，引导程序会把它标记为失败，自动回到安装包自带的版本，之后也不会再下载这个版本。
 - 渲染层的 chunk 使用固定文件名，第三方库拆分到独立的 `vendor-*.js`，所以改一处代码只会影响一个文件，不会连带改动其他文件。
 
@@ -154,10 +154,10 @@ git push origin main v1.0.1
 推送标签后，[.github/workflows/build.yml](.github/workflows/build.yml) 会在三个平台上构建安装包，然后在 `release` 任务里：
 
 1. 检查标签与 `package.json` 版本一致，并确认签名私钥与应用内置的公钥匹配；
-2. 生成签名的 `latest.json` 和 `latest.json.sig`。上一个 Release 已有的程序文件直接引用原地址，只把新增或变化的 `<sha256>.gz` 作为附件上传；
+2. 生成签名的 `latest.json` 和 `latest.json.sig`。程序文件（`<sha256>.gz`，按内容哈希命名）统一放在预发布 `update-files` 里，所有版本共用：已有的直接引用，只上传新增或变化的，上传后先逐个下载校验；
 3. 先创建草稿 Release 并上传全部安装包和更新文件，最后再正式发布。发布的那一刻 `releases/latest` 才切换过去，所以已安装的应用不会读到上传了一半的版本。
 
-> 更新文件引用了更早 Release 的附件，请不要删除旧的 Release（可以编辑说明，但别删附件）。
+> 版本 Release 页面只有安装包和 `latest.json`。`update-files` 是所有版本共用的程序文件库，已安装的应用从这里下载，请不要删除它或其中的文件。发布完成后，CI 会用 `scripts/verify-github-feed.mjs` 按应用的方式检查一遍线上的更新（签名、每个文件的哈希、每个安装包），也可以随时手动运行：`node scripts/verify-github-feed.mjs imxiangli/MarkFlow`。
 
 **自建更新服务器（可选）**
 

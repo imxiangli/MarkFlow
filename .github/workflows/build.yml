@@ -2,8 +2,9 @@ name: Build & release
 
 # Pushing a tag v<version> (matching package.json) builds the installers for macOS, Windows
 # and Linux and publishes them as a GitHub release together with the signed update feed
-# (latest.json, latest.json.sig and the changed app files), which installed apps read.
-# Running the workflow by hand only builds the installers.
+# (latest.json, latest.json.sig), which installed apps read. The app files the feed points at
+# live in one prerelease, update-files, shared by all versions: each release only adds the
+# files that changed. Running the workflow by hand only builds the installers.
 
 on:
   push:
@@ -64,6 +65,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ github.ref_name }}
+      FILES_TAG: update-files
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -102,9 +104,17 @@ jobs:
           # Release notes: the annotated tag's message, if any.
           git fetch --force --depth=1 origin "+refs/tags/$TAG:refs/tags/$TAG"
           git tag -l --format='%(contents)' "$TAG" | sed '/-----BEGIN PGP SIGNATURE-----/,$d' > notes.md
-          args=(--github "$GITHUB_REPOSITORY" --tag "$TAG" --full-dir installers --out gh-assets)
+          # The shared app-file release: a prerelease, so it never becomes releases/latest.
+          if ! gh release view "$FILES_TAG" >/dev/null 2>&1; then
+            gh release create "$FILES_TAG" --prerelease --latest=false --target "$GITHUB_SHA" \
+              --title "Update files (used by auto-update)" \
+              --notes "App files for MarkFlow's incremental updates, shared by all versions. Download installers from the version releases. Please don't delete these files: installed apps download from here."
+          fi
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$FILES_TAG" -q .id)
+          gh api "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" --paginate -q '.[].name' > existing.txt
+          args=(--github "$GITHUB_REPOSITORY" --tag "$TAG" --files-tag "$FILES_TAG" --existing existing.txt --full-dir installers --out gh-assets)
           [ -s notes.md ] && args+=(--notes-file notes.md)
-          # The previous release's manifest: app files it already has are not uploaded again.
+          # The previous release's manifest, to report the update size.
           if curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json" -o previous.json; then
             args+=(--previous previous.json)
           fi
@@ -114,6 +124,14 @@ jobs:
             const full = require("./gh-assets/latest.json").full ?? {}
             const missing = ["darwin-arm64", "darwin-x64", "win32-x64", "win32-arm64", "linux-x64"].filter((k) => !full[k])
             if (missing.length) { console.error("::error::No installer for " + missing.join(", ")); process.exit(1) }'
+      - name: Upload new app files
+        run: |
+          # Before the release exists, so latest.json never points at a missing file.
+          shopt -s nullglob
+          files=(gh-assets/files/*)
+          if [ ${#files[@]} -gt 0 ]; then gh release upload "$FILES_TAG" "${files[@]}"; fi
+          echo "${#files[@]} new app files"
+          node scripts/verify-github-feed.mjs --manifest gh-assets/latest.json --no-installers
       - name: Publish the release
         run: |
           # Drafts left behind by failed runs are replaced (gh release view can't see drafts).
@@ -122,6 +140,8 @@ jobs:
             while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; done
           if [ -s notes.md ]; then notes=(--notes-file notes.md); else notes=(--generate-notes); fi
           gh release create "$TAG" --draft --verify-tag --title "MarkFlow $VERSION" "${notes[@]}"
-          gh release upload "$TAG" installers/* gh-assets/*
+          gh release upload "$TAG" installers/* gh-assets/latest.json gh-assets/latest.json.sig
           # Publishing last switches releases/latest — and so every installed app — in one step.
           gh release edit "$TAG" --draft=false --latest
+      - name: Check the published feed
+        run: node scripts/verify-github-feed.mjs "$GITHUB_REPOSITORY"

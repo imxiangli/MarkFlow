@@ -1,0 +1,65 @@
+name: Move update files
+
+# One-off, run by hand: moves the app files (<sha256>.gz) of a release published before the
+# shared update-files release existed (v1.0.0) out of that release's page. Order keeps installed
+# apps working throughout: copy the files, check the new feed, swap latest.json, then delete.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release whose app files move into update-files
+        default: v1.0.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  move:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+      FILES_TAG: update-files
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Copy the app files and re-sign the manifest
+        env:
+          MARKFLOW_UPDATE_KEY: ${{ secrets.MARKFLOW_UPDATE_KEY }}
+        run: |
+          mkdir -p old
+          gh release download "$TAG" -p latest.json -D old
+          node scripts/relocate-update-files.mjs --github "$GITHUB_REPOSITORY" --manifest old/latest.json --files-tag "$FILES_TAG" --out moved
+          echo "$(wc -l < moved/old-assets.txt) assets to remove from $TAG"
+      - name: Upload them to the shared release
+        run: |
+          if ! gh release view "$FILES_TAG" >/dev/null 2>&1; then
+            gh release create "$FILES_TAG" --prerelease --latest=false --target "$GITHUB_SHA" \
+              --title "Update files (used by auto-update)" \
+              --notes "App files for MarkFlow's incremental updates, shared by all versions. Download installers from the version releases. Please don't delete these files: installed apps download from here."
+          fi
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$FILES_TAG" -q .id)
+          gh api "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" --paginate -q '.[].name' > existing.txt
+          shopt -s nullglob
+          todo=()
+          for f in moved/files/*; do grep -qxF "$(basename "$f")" existing.txt || todo+=("$f"); done
+          if [ ${#todo[@]} -gt 0 ]; then gh release upload "$FILES_TAG" "${todo[@]}"; fi
+          echo "uploaded ${#todo[@]} files"
+      - name: Check the new manifest before using it
+        run: node scripts/verify-github-feed.mjs --manifest moved/latest.json
+      - name: Swap latest.json
+        run: |
+          gh release upload "$TAG" moved/latest.json.sig moved/latest.json --clobber
+          if [ "$(gh release view --json tagName -q .tagName)" = "$TAG" ]; then
+            node scripts/verify-github-feed.mjs "$GITHUB_REPOSITORY"
+          fi
+      - name: Remove the app files from the version release
+        run: |
+          while read -r name; do
+            [ -n "$name" ] && gh release delete-asset "$TAG" "$name" --yes
+          done < moved/old-assets.txt
+          echo "$TAG now has $(gh release view "$TAG" --json assets -q '.assets | length') assets"
