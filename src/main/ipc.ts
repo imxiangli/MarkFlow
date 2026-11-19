@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, net, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, nativeImage, nativeTheme, net, shell, type IpcMainInvokeEvent } from 'electron'
 import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, extname, join, basename } from 'node:path'
@@ -354,7 +354,7 @@ export function registerIpc(): void {
       image = nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()))
     }
     if (image.isEmpty()) throw new Error('Unsupported image')
-    clipboard.writeImage(image)
+    await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }) })])
   })
   ipcMain.on('mf:set-fullscreen', (e, flag: unknown) => {
     const win = BrowserWindow.fromWebContents(e.sender)

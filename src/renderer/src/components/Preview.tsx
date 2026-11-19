@@ -20,7 +20,8 @@ import type { DiagramContext } from '@/markdown/diagrams'
 import { activeTab, getState, resolvedTheme, setState, toast, useStore } from '@/store'
 import { BlockEditor } from './BlockEditor'
 import { openContextMenu, type MenuItem } from './ContextMenu'
-import { clipboardKey, copyImage, revealLabel } from '@/editor/contextMenu'
+import { clipboardKey, copyImage, revealLabel, spliceLines, tableItems } from '@/editor/contextMenu'
+import { parseTable, tableEnd } from '@/editor/table'
 import { ASSET_SCHEME } from '@shared/constants'
 
 const scrollPositions = new Map<string, number>()
@@ -559,6 +560,33 @@ export function Preview({ visible }: { visible: boolean }) {
     const pre = target.closest('pre')
     const code = pre?.querySelector('code')
     if (code && !diagram) items.push({ label: t('ctx.copyCode'), onClick: () => copied((code.textContent ?? '').replace(/\n$/, '')) }, { separator: true })
+
+    // Table cells: rows and columns are edited in the source, found through data-line.
+    const cell = target.closest<HTMLTableCellElement>('td, th')
+    const table = cell?.closest<HTMLElement>('table[data-line]')
+    const row = cell?.closest<HTMLElement>('tr[data-line]')
+    if (cell && table && row && tabNow.kind === 'markdown' && !editingRef.current) {
+      const source = (editorBridge.getContent(tabNow.id) ?? tabNow.content).split('\n')
+      const start = Number(table.getAttribute('data-line'))
+      const end = tableEnd(source, start)
+      const lines = source.slice(start, end)
+      const line = Number(row.getAttribute('data-line')) - start
+      if (parseTable(lines) && line >= 0 && line < lines.length) {
+        const write = (text: string) => {
+          const next = spliceLines(source, start, end, text)
+          renderNow.current = true
+          applySource(tabNow.id, next)
+          // Keep "show source" toggles on the blocks below pointing at the same blocks.
+          const delta = next.split('\n').length - source.length
+          const toggles = sourceToggles.get(tabNow.id)
+          if (delta && toggles?.size) sourceToggles.set(tabNow.id, new Set([...toggles].map((s) => (s > start ? s + delta : s))))
+        }
+        items.push(
+          ...tableItems(lines, line, cell.cellIndex, (edit) => write(edit.text), () => write('')),
+          { separator: true }
+        )
+      }
+    }
 
     const heading = target.closest<HTMLElement>('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]')
     if (heading) items.push({ label: t('ctx.copyAnchor'), onClick: () => copied(`#${heading.id}`) }, { separator: true })

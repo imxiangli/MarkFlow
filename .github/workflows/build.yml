@@ -35,6 +35,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:md
+      - run: npm run test:table
       - run: npm run build
       - run: npx electron-builder ${{ matrix.target }} --publish never
         env:

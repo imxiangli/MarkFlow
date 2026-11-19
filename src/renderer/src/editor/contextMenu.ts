@@ -20,6 +20,7 @@ import type { MenuCommand } from '@shared/types'
 import { editorBridge } from './bridge'
 import { runFormat, setHeading, type FormatCommand } from './commands'
 import { editorCommand } from './keymap'
+import { alignOf, columnAt, editTable, parseTable, type TableEdit, type TableOp } from './table'
 
 type SyntaxNode = ReturnType<ReturnType<typeof syntaxTree>['resolveInner']>
 
@@ -68,6 +69,8 @@ interface Context {
   heading?: { line: number; level: number; text: string }
   task?: { line: number; done: boolean }
   code?: CodeInfo
+  /** 1-based first / last line of the table, and the caret's table line and column. */
+  table?: { first: number; last: number; line: number; col: number }
 }
 
 function unwrapUrl(url: string): string {
@@ -98,6 +101,20 @@ function codeInfo(state: EditorState, node: SyntaxNode): CodeInfo {
 const TASK = /^((?:\s*>)*\s*(?:[-*+]|\d+[.)])\s+)\[([ xX])\]/
 const WIKILINK = /\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g
 
+function tableAt(state: EditorState, node: SyntaxNode, pos: number): Context['table'] | null {
+  const doc = state.doc
+  const first = doc.lineAt(node.from).number
+  let last = doc.lineAt(node.to).number
+  while (last > first + 1 && !doc.line(last).text.includes('|')) last--
+  const lines: string[] = []
+  for (let n = first; n <= last; n++) lines.push(doc.line(n).text)
+  const table = parseTable(lines)
+  if (!table) return null
+  const at = doc.lineAt(pos)
+  const line = Math.max(0, Math.min(last, at.number) - first)
+  return { first, last, line, col: columnAt(at.text, pos - at.from, table.header.length) }
+}
+
 function contextAt(state: EditorState, pos: number): Context {
   const ctx: Context = {}
   const tree = syntaxTree(state)
@@ -113,6 +130,7 @@ function contextAt(state: EditorState, pos: number): Context {
         inCode = true
         ctx.code ??= codeInfo(state, node)
       } else if (name === 'CodeBlock' || name === 'HTMLBlock' || name === 'CommentBlock') inCode = true
+      else if (name === 'Table' && !ctx.table) ctx.table = tableAt(state, node, pos) ?? undefined
       else if (!ctx.heading) {
         const m = /^(?:ATX|Setext)Heading(\d)$/.exec(name)
         if (m) {
@@ -231,6 +249,84 @@ function setCodeLanguage(view: EditorView, code: CodeInfo, lang: string): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* Tables                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The "Table" submenu for table source `lines` with the caret on table line `line`, column `col`;
+ * `apply` writes an edit back, `remove` deletes the whole table. Shared with the preview.
+ */
+export function tableItems(lines: string[], line: number, col: number, apply: (edit: TableEdit) => void, remove: () => void): MenuItem[] {
+  const op = (o: TableOp, label: string, extra: Partial<MenuItem> = {}): MenuItem => {
+    const edit = editTable(lines, line, col, o)
+    return { label, disabled: !edit, onClick: () => edit && apply(edit), ...extra }
+  }
+  const align = alignOf(lines, col)
+  return [
+    {
+      label: t('ctx.table'),
+      submenu: [
+        op('rowAbove', t('table.rowAbove')),
+        op('rowBelow', t('table.rowBelow')),
+        op('colLeft', t('table.colLeft')),
+        op('colRight', t('table.colRight')),
+        { separator: true },
+        op('rowUp', t('table.rowUp')),
+        op('rowDown', t('table.rowDown')),
+        op('colMoveLeft', t('table.colMoveLeft')),
+        op('colMoveRight', t('table.colMoveRight')),
+        { separator: true },
+        {
+          label: t('table.align'),
+          submenu: [
+            op('alignLeft', t('table.alignLeft'), { checked: align === 'left' }),
+            op('alignCenter', t('table.alignCenter'), { checked: align === 'center' }),
+            op('alignRight', t('table.alignRight'), { checked: align === 'right' }),
+            { separator: true },
+            op('alignNone', t('table.alignNone'), { checked: align === null })
+          ]
+        },
+        op('format', t('table.format')),
+        { separator: true },
+        op('deleteRow', t('table.deleteRow'), { danger: true }),
+        op('deleteCol', t('table.deleteCol'), { danger: true }),
+        { label: t('table.delete'), danger: true, onClick: remove }
+      ]
+    }
+  ]
+}
+
+/** Lines [start, end) of `lines` replaced by `text`; an empty text also drops one blank line after. */
+export function spliceLines(lines: string[], start: number, end: number, text: string): string {
+  if (!text && end < lines.length && !lines[end].trim()) end++
+  return [...lines.slice(0, start), ...(text ? text.split('\n') : []), ...lines.slice(end)].join('\n')
+}
+
+function editorTableItems(view: EditorView, table: NonNullable<Context['table']>): MenuItem[] {
+  const doc = view.state.doc
+  const lines: string[] = []
+  for (let n = table.first; n <= table.last; n++) lines.push(doc.line(n).text)
+  const from = doc.line(table.first).from
+  const to = doc.line(table.last).to
+  const apply = (edit: TableEdit) => {
+    const anchor = from + edit.text.split('\n').slice(0, edit.line).reduce((n, l) => n + l.length + 1, 0) + edit.ch
+    view.dispatch({ changes: { from, to, insert: edit.text }, selection: { anchor }, userEvent: 'input.format', scrollIntoView: true })
+    view.focus()
+  }
+  const remove = () => {
+    // Take the line break and one blank line after the table with it.
+    let end = to
+    if (table.last < doc.lines) {
+      end = doc.line(table.last + 1).from
+      if (!doc.line(table.last + 1).text.trim() && table.last + 1 < doc.lines) end = doc.line(table.last + 2).from
+    }
+    view.dispatch({ changes: { from, to: end }, selection: { anchor: from }, userEvent: 'delete', scrollIntoView: true })
+    view.focus()
+  }
+  return tableItems(lines, table.line, table.col, apply, remove)
+}
+
+/* ------------------------------------------------------------------ */
 /* Menu                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -289,6 +385,7 @@ function contextItems(view: EditorView, ctx: Context): MenuItem[] {
     const task = ctx.task
     items.push({ label: t(task.done ? 'ctx.taskUndone' : 'ctx.taskDone'), onClick: () => toggleTask(view, task.line) }, { separator: true })
   }
+  if (ctx.table && !view.state.readOnly) items.push(...editorTableItems(view, ctx.table), { separator: true })
   if (ctx.code) {
     const code = ctx.code
     const langs = code.lang && !CODE_LANGUAGES.includes(code.lang) ? [code.lang, ...CODE_LANGUAGES] : CODE_LANGUAGES
