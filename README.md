@@ -115,34 +115,62 @@ npm run dist:linux   # AppImage + deb + tar.gz
 | 类型 | 何时使用 | 下载量 |
 | --- | --- | --- |
 | **增量更新** | Electron 版本没变（绝大多数版本） | 只下载内容有变化的文件。实测只改业务代码时约 **30–40 KB** |
-| 完整更新 | 升级了 Electron 运行时 | 下载对应平台的安装包（DMG / NSIS / AppImage），由用户安装 |
+| 完整更新 | 升级了 Electron 运行时 | 下载对应平台的完整包，重启时自动安装（见下表） |
+
+更新默认来自 GitHub 仓库 [imxiangli/MarkFlow](https://github.com/imxiangli/MarkFlow) 的 Releases（`package.json` 中的 `"markflow": { "github": "imxiangli/MarkFlow" }`）。完整更新在三个平台上的安装方式：
+
+| 平台 | 下载 | 安装 |
+| --- | --- | --- |
+| macOS | `MarkFlow-<版本>-mac-<arm64/x64>.zip` | 解压到用户数据目录，退出后替换正在使用的 `MarkFlow.app` 并重新打开。如果应用所在目录不可写（例如直接从 DMG 运行），改为下载后在 Finder 中手动打开 |
+| Windows | `MarkFlow-Setup-<版本>-<x64/arm64>.exe` | 退出后以静默模式运行安装程序（`/S --updated --force-run`），保留原安装位置，装完自动启动。便携版（zip）改为打开安装程序 |
+| Linux | `MarkFlow-<版本>-linux-x86_64.AppImage` | 替换正在运行的 AppImage 文件并重新启动。通过 `.deb` 安装的用户会下载新的 `.deb` 并交给系统的软件包安装器 |
 
 **工作原理**
 
 - `src/bootstrap/` 是安装包里唯一不会被热更新替换的引导程序。启动时它检查 `<用户数据>/updates/state.json`，如果有更新、兼容且没被标记为失败的版本，就加载 `updates/<版本>/out/main/index.js`，否则加载安装包自带的代码。
-- 更新器（`src/main/updater.ts`）每 6 小时检查一次 `latest.json`。先用内置的 Ed25519 公钥校验签名，再逐个文件比对哈希：本地已有的文件直接复制，其余文件从 `files/<sha256>.gz` 下载。全部解压并校验后，才原子地切换到新版本，下次启动生效（也可以点"重启并更新"）。
+- 更新器（`src/main/updater.ts`）每 6 小时读取一次 `releases/latest/download/latest.json`，并用内置的 Ed25519 公钥校验签名（签名从对应版本的标签 `releases/download/v<版本>/latest.json.sig` 读取）。然后逐个文件比对哈希：本地已有的文件直接复制，其余文件从清单里记录的 Release 附件地址下载。全部解压并校验后，才原子地切换到新版本，下次启动生效（也可以点"重启并更新"）。
 - **回滚保护**：新版本加载时出错，或连续两次没能完成启动，引导程序会把它标记为失败，自动回到安装包自带的版本，之后也不会再下载这个版本。
 - 渲染层的 chunk 使用固定文件名，第三方库拆分到独立的 `vendor-*.js`，所以改一处代码只会影响一个文件，不会连带改动其他文件。
 
-**发布流程**
+**发布流程（GitHub Releases）**
+
+一次性准备：
 
 ```bash
-npm run update:keygen      # 只需一次：生成签名密钥，私钥在 keys/（已忽略，请务必备份）
-npm run dist:mac           # 等平台安装包（可选，用于需要完整更新的情况）
-npm run build
-npm run release:update -- --notes "修复了……"
+npm run update:keygen      # 生成签名密钥：公钥写入 src/main/update-public-key.ts，私钥在 keys/（已忽略，请务必备份）
 ```
 
-生成的 `release/update/` 是一个纯静态目录，用部署脚本上传到更新服务器（脚本会先上传内容、最后上传 `latest.json`），再用校验脚本检查：
+把 `keys/update-private.pem` 的全部内容添加为仓库密钥 `MARKFLOW_UPDATE_KEY`（GitHub → Settings → Secrets and variables → Actions）。
+
+每次发版：
 
 ```bash
-npm run deploy:update -- deploy@updates.example.com:/opt/markflow-update/data   # 或本地目录 / 挂载点
+npm version 1.0.1 --no-git-tag-version      # 修改 package.json 中的版本号
+git commit -am "Release 1.0.1"
+git tag -a v1.0.1 -m "修复了……"              # 标签说明会作为更新说明显示在应用里
+git push origin main v1.0.1
+```
+
+推送标签后，[.github/workflows/build.yml](.github/workflows/build.yml) 会在三个平台上构建安装包，然后在 `release` 任务里：
+
+1. 检查标签与 `package.json` 版本一致，并确认签名私钥与应用内置的公钥匹配；
+2. 生成签名的 `latest.json` 和 `latest.json.sig`。上一个 Release 已有的程序文件直接引用原地址，只把新增或变化的 `<sha256>.gz` 作为附件上传；
+3. 先创建草稿 Release 并上传全部安装包和更新文件，最后再正式发布。发布的那一刻 `releases/latest` 才切换过去，所以已安装的应用不会读到上传了一半的版本。
+
+> 更新文件引用了更早 Release 的附件，请不要删除旧的 Release（可以编辑说明，但别删附件）。
+
+**自建更新服务器（可选）**
+
+如果 GitHub 访问不稳定，也可以把更新放在自己的静态服务器上。在应用的「设置 → 更新」里填写服务器地址，或在 `package.json` 中设置 `"markflow": { "updateUrl": "https://你的域名/markflow/" }`（优先于 `github`）。设置里也可以填 `github:用户名/仓库`，改用其他仓库的 Releases。
+
+```bash
+npm run build
+npm run release:update -- --notes "修复了……"        # 生成 release/update/
+npm run deploy:update -- deploy@updates.example.com:/opt/markflow-update/data
 npm run verify:update -- https://updates.example.com/markflow/
 ```
 
 **更新服务器的要求和四种部署方式**（Docker + Caddy 自动 HTTPS、已有 nginx、对象存储 + CDN、Node + systemd）见 [docs/update-server.md](docs/update-server.md)。对应的配置文件都在 [server/](server) 目录下。
-
-更新地址在 `package.json` 的 `"markflow": { "updateUrl": "https://你的域名/markflow/" }` 中配置，也可以在应用的「设置 → 更新」里修改。CI 工作流中的 `update-feed` 任务会自动生成这个目录，需要把私钥配置为 `MARKFLOW_UPDATE_KEY` 仓库密钥。
 
 > 私钥一旦丢失，已安装的客户端就无法再验证新的更新，只能重新分发安装包。
 

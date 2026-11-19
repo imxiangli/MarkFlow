@@ -6,6 +6,11 @@ export interface UpdateFile {
   size: number
   /** Size of files/<sha256>.gz on the server. */
   gzSize: number
+  /**
+   * Absolute URL of the gzip blob. Set for GitHub Releases feeds, where each blob is a release
+   * asset of the release that first shipped it; otherwise the blob is `files/<sha256>.gz`.
+   */
+  url?: string
 }
 
 export interface FullPackage {
@@ -26,7 +31,11 @@ export interface UpdateManifest {
   /** Minimum bootstrap contract version (see src/bootstrap/index.ts). */
   bootstrapApi: number
   files: UpdateFile[]
-  /** Installers keyed by `${process.platform}-${process.arch}`, used when a hot update is impossible. */
+  /**
+   * Installers used when a hot update is impossible, keyed by `${process.platform}-${process.arch}`:
+   * the macOS .zip, the Windows NSIS .exe and the Linux AppImage, which the updater installs by
+   * itself. `linux-<arch>-deb` is offered to installs from the .deb package instead.
+   */
   full?: Record<string, FullPackage>
 }
 
@@ -59,6 +68,10 @@ export interface UpdateState {
   /** Size of the full installer, for comparison. */
   fullSize?: number
   installerPath?: string
+  /** The downloaded installer is applied by the updater on restart (no manual steps). */
+  autoInstall?: boolean
+  /** Where updates come from: "GitHub imxiangli/MarkFlow" or the configured URL. */
+  source?: string
   error?: string
   /** Reason the updater is disabled: 'no-url' | 'dev'. */
   disabledReason?: string

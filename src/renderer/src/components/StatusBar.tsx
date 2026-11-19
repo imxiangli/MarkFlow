@@ -76,7 +76,8 @@ function UpdateIndicator() {
   if (!u) return null
   let label = ''
   if (u.status === 'downloading' || u.status === 'full-downloading') label = t('status.updating', { percent: updatePercent(u) })
-  else if (u.status === 'ready') label = t('status.updateReady', { version: u.latestVersion ?? '' })
+  else if (u.status === 'ready' || (u.status === 'full-ready' && u.autoInstall))
+    label = t('status.updateReady', { version: u.latestVersion ?? '' })
   else if (u.status === 'available' || u.status === 'full-available' || u.status === 'full-ready')
     label = t('status.updateAvailable', { version: u.latestVersion ?? '' })
   if (!label) return null
@@ -84,7 +85,7 @@ function UpdateIndicator() {
     <button
       className={`status-update ${u.status}`}
       onClick={() => {
-        if (u.status === 'ready') void window.mf.installUpdate()
+        if (u.status === 'ready' || (u.status === 'full-ready' && u.autoInstall)) void window.mf.installUpdate()
         else setState({ settingsOpen: true, settingsSection: 'update' })
       }}
     >

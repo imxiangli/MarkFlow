@@ -8,7 +8,7 @@
     "name": "MarkFlow"
   },
   "license": "MIT",
-  "homepage": "https://github.com/markflow/markflow",
+  "homepage": "https://github.com/imxiangli/MarkFlow",
   "scripts": {
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
@@ -96,6 +96,7 @@
     "zustand": "^5.0.15"
   },
   "markflow": {
+    "github": "imxiangli/MarkFlow",
     "updateUrl": ""
   }
 }

@@ -88,7 +88,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', () => {
     for (const ctx of contexts.values()) disposeWatchers(ctx)
     updater.stop()
-    // Restart into a freshly downloaded incremental update.
-    if (updater.shouldRelaunch()) app.relaunch()
+    // Restart into a freshly downloaded update, or start installing a full package.
+    updater.applyOnQuit()
   })
 }

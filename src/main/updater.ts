@@ -1,22 +1,47 @@
 /**
  * Auto-updater with incremental (file-level) updates.
  *
- * Server layout (static hosting is enough, see scripts/release-update.mjs):
+ * By default updates come from the GitHub Releases of `markflow.github` in package.json
+ * (built and published by .github/workflows/build.yml):
+ *   releases/latest/download/latest.json      signed manifest of the newest release
+ *   releases/download/v<ver>/latest.json.sig  its signature, read from the immutable tag
+ *   releases/download/v<ver>/<sha256>.gz      app files; the manifest gives each one's URL
+ *   releases/download/v<ver>/<installer>      macOS .zip, Windows .exe, Linux AppImage / .deb
+ *
+ * A self-hosted feed (markflow.updateUrl, the settings field or $MARKFLOW_UPDATE_URL) uses
+ * this layout instead (static hosting is enough, see scripts/release-update.mjs):
  *   <base>/latest.json          signed manifest (UpdateManifest)
  *   <base>/latest.json.sig      base64 Ed25519 signature of latest.json's exact bytes
  *   <base>/files/<sha256>.gz    content-addressed app files
  *   <base>/full/<ver>/<name>    full installers, only needed when the Electron runtime changes
  *
  * A hot update copies unchanged files from the running app and downloads only the rest,
- * then src/bootstrap picks the new version up on the next launch.
+ * then src/bootstrap picks the new version up on the next launch. When the Electron runtime
+ * changes, the full package is downloaded and installed on restart: the .app bundle is swapped
+ * on macOS, the NSIS installer runs silently on Windows and the AppImage replaces itself on
+ * Linux. Other installs (read-only locations, .deb, portable zip) get the file to open by hand.
  */
 import { app, net, shell } from 'electron'
+import { execFile, spawn } from 'node:child_process'
 import { createHash, createPublicKey, verify } from 'node:crypto'
-import { createWriteStream, existsSync, promises as fs, readFileSync, renameSync, writeFileSync, mkdirSync } from 'node:fs'
+import {
+  accessSync,
+  chmodSync,
+  constants as fsConstants,
+  copyFileSync,
+  createWriteStream,
+  existsSync,
+  promises as fs,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync
+} from 'node:fs'
 import { basename, dirname, isAbsolute, join, normalize } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { markflow as packageConfig } from '../../package.json'
-import { compareVersions, type UpdateManifest, type UpdateState } from '@shared/update'
+import { compareVersions, type FullPackage, type UpdateManifest, type UpdateState } from '@shared/update'
 import { UPDATE_PUBLIC_KEY } from './update-public-key'
 import { getStore } from './store'
 import { broadcast } from './windows'
@@ -58,16 +83,125 @@ function writeHotState(state: HotState): void {
   renameSync(statePath() + '.tmp', statePath())
 }
 
-function baseUrl(): string {
-  const url =
-    process.env['MARKFLOW_UPDATE_URL'] || getStore().settings.updateUrl.trim() || (packageConfig?.updateUrl ?? '')
-  if (!url) return ''
-  return url.endsWith('/') ? url : url + '/'
+interface Feed {
+  /** Folder that holds latest.json, with a trailing slash. */
+  base: string
+  /** Immutable signature of one version's manifest, tried before base + latest.json.sig. */
+  versionSig: (version: string) => string
+  /** Add a cache-busting query to latest.json (GitHub's redirects are never cached). */
+  bust: boolean
+  label: string
+}
+
+function githubFeed(repo: string): Feed {
+  const releases = `https://github.com/${repo}/releases`
+  return {
+    base: `${releases}/latest/download/`,
+    versionSig: (v) => `${releases}/download/v${v}/latest.json.sig`,
+    bust: false,
+    label: `GitHub ${repo}`
+  }
+}
+
+const GITHUB_REPO = /^(?:github:|https?:\/\/github\.com\/)?([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i
+
+/**
+ * The update source, in order: $MARKFLOW_UPDATE_URL (tests), the settings field, the URL baked
+ * into package.json, then the GitHub repository from package.json. A URL or "github:owner/repo"
+ * pointing at a GitHub repository reads that repository's releases.
+ */
+function feed(): Feed | null {
+  const custom = (
+    process.env['MARKFLOW_UPDATE_URL'] ||
+    getStore().settings.updateUrl.trim() ||
+    (packageConfig?.updateUrl ?? '')
+  ).trim()
+  if (custom) {
+    const gh = /^(github:|https?:\/\/github\.com\/)/i.test(custom) ? GITHUB_REPO.exec(custom) : null
+    if (gh) return githubFeed(gh[1])
+    const base = custom.endsWith('/') ? custom : custom + '/'
+    return { base, versionSig: (v) => `${base}versions/${v}.json.sig`, bust: true, label: base }
+  }
+  const repo = GITHUB_REPO.exec((packageConfig?.github ?? '').trim())
+  return repo ? githubFeed(repo[1]) : null
 }
 
 function resolveUrl(path: string): string {
-  return /^https?:\/\//i.test(path) ? path : baseUrl() + path.replace(/^\/+/, '')
+  return /^https?:\/\//i.test(path) ? path : (feed()?.base ?? '') + path.replace(/^\/+/, '')
 }
+
+/** How a full package gets installed on this machine. */
+type InstallMode =
+  | 'mac-app' // unzip next to the running .app and swap the bundle after quitting
+  | 'nsis' // run the NSIS installer silently after quitting; it relaunches the app
+  | 'appimage' // replace the running AppImage file and relaunch it
+  | 'open' // hand the file to the OS (dmg, .deb, interactive installer)
+  | 'reveal' // show the file in the file manager
+
+/** The running .app bundle, when it can be replaced in place (not translocated, writable). */
+function macBundle(): string | null {
+  const m = /^(.+?\.app)\/Contents\/MacOS\/[^/]+$/.exec(process.execPath)
+  if (!m || m[1].includes('/AppTranslocation/')) return null
+  try {
+    accessSync(dirname(m[1]), fsConstants.W_OK)
+    accessSync(m[1], fsConstants.W_OK)
+    return m[1]
+  } catch {
+    return null
+  }
+}
+
+/** The installed AppImage, when its folder is writable. */
+function appImagePath(): string | null {
+  const p = process.env['APPIMAGE']
+  if (!p) return null
+  try {
+    accessSync(dirname(p), fsConstants.W_OK)
+    return p
+  } catch {
+    return null
+  }
+}
+
+/** Installed with the NSIS installer (not the portable zip): its uninstaller sits next to the exe. */
+function nsisInstalled(): boolean {
+  return existsSync(join(dirname(process.execPath), `Uninstall ${app.getName()}.exe`))
+}
+
+function pickFull(m: UpdateManifest): { pkg: FullPackage; mode: InstallMode } | null {
+  const id = `${process.platform}-${process.arch}`
+  const name = (p: FullPackage): string => p.name || basename(p.url)
+  if (process.platform === 'linux' && !process.env['APPIMAGE']) {
+    // The .deb installs into /opt/<productName>; its users get the .deb rather than an AppImage.
+    const deb = m.full?.[`${id}-deb`]
+    if (deb && process.execPath.startsWith('/opt/')) return { pkg: deb, mode: 'open' }
+  }
+  const pkg = m.full?.[id]
+  if (!pkg) return null
+  const file = name(pkg)
+  if (process.platform === 'darwin') return { pkg, mode: file.endsWith('.zip') && macBundle() ? 'mac-app' : 'open' }
+  if (process.platform === 'win32') return { pkg, mode: /\.exe$/i.test(file) && nsisInstalled() ? 'nsis' : 'open' }
+  return { pkg, mode: file.endsWith('.AppImage') && appImagePath() ? 'appimage' : 'reveal' }
+}
+
+const run = (cmd: string, args: string[]): Promise<void> =>
+  new Promise((res, rej) => execFile(cmd, args, (err) => (err ? rej(err) : res())))
+
+/**
+ * Waits for the app to exit, swaps in the new bundle (restoring the old one if that fails)
+ * and opens it. Args: pid, current bundle, new bundle.
+ */
+const MAC_SWAP_SCRIPT = `
+pid="$1"; app="$2"; new="$3"; i=0
+while kill -0 "$pid" 2>/dev/null; do i=$((i+1)); [ "$i" -gt 600 ] && exit 1; sleep 0.1; done
+old="$app.old-update"
+rm -rf "$old"
+if mv "$app" "$old"; then
+  if mv "$new" "$app"; then rm -rf "$old"; else rm -rf "$app"; mv "$old" "$app"; fi
+fi
+xattr -dr com.apple.quarantine "$app" 2>/dev/null
+open "$app"
+`
 
 const sha256 = (buf: Buffer): string => createHash('sha256').update(buf).digest('hex')
 
@@ -127,6 +261,9 @@ class Updater {
   private busy = false
   private relaunchOnQuit = false
   private timer: NodeJS.Timeout | null = null
+  /** Full package downloaded for an automatic install. */
+  private fullReady: { mode: InstallMode; path: string } | null = null
+  private installOnQuit = false
 
   constructor() {
     this.state = {
@@ -134,6 +271,14 @@ class Updater {
       currentVersion: appVersion(),
       baseVersion: process.env['MARKFLOW_BASE_VERSION'] || app.getVersion(),
       hot: process.env['MARKFLOW_HOT'] === '1'
+    }
+  }
+
+  private source(): string | undefined {
+    try {
+      return feed()?.label
+    } catch {
+      return undefined
     }
   }
 
@@ -146,7 +291,8 @@ class Updater {
       currentVersion: this.state.currentVersion,
       baseVersion: this.state.baseVersion,
       hot: this.state.hot,
-      lastChecked: this.state.lastChecked
+      lastChecked: this.state.lastChecked,
+      source: this.source()
     }
     this.state = replace ? { ...base, status: 'idle', ...patch } : { ...this.state, ...patch }
     broadcast('mf:update-state', this.state)
@@ -155,11 +301,12 @@ class Updater {
 
   private disabledReason(): string | null {
     if (!app.isPackaged && !process.env['MARKFLOW_FORCE_HOT']) return 'dev'
-    if (!baseUrl()) return 'no-url'
+    if (!feed()) return 'no-url'
     return null
   }
 
   start(): void {
+    this.state.source = this.source()
     const reason = this.disabledReason()
     if (reason) this.set({ status: 'disabled', disabledReason: reason }, true)
     const schedule = () => {
@@ -187,7 +334,12 @@ class Updater {
       if (compareVersions(manifest.version, appVersion()) <= 0) {
         return this.set({ status: 'up-to-date', latestVersion: manifest.version, lastChecked }, true)
       }
-      const info = { latestVersion: manifest.version, notes: notesText(manifest), lastChecked, fullSize: this.fullPackage()?.size }
+      const info = {
+        latestVersion: manifest.version,
+        notes: notesText(manifest),
+        lastChecked,
+        fullSize: pickFull(manifest)?.pkg.size
+      }
       if (this.canHotUpdate(manifest)) {
         const hot = readHotState()
         if (hot.current?.version === manifest.version && existsSync(join(updatesDir(), hot.current.dir, 'out/main/index.js'))) {
@@ -206,13 +358,16 @@ class Updater {
   }
 
   /**
-   * latest.json is verified against the immutable versions/<version>.json.sig, which the
-   * deploy script uploads before latest.json — so a half-finished upload or a CDN serving a
-   * stale latest.json never pairs a manifest with the wrong signature.
+   * latest.json is verified against the immutable signature of the version it claims
+   * (versions/<version>.json.sig, or the release tagged v<version> on GitHub), which is in place
+   * before latest.json changes — so a half-finished upload or a CDN serving a stale latest.json
+   * never pairs a manifest with the wrong signature.
    */
   private async fetchManifest(): Promise<UpdateManifest> {
-    const base = baseUrl()
-    const raw = Buffer.from(await (await fetchWithTimeout(`${base}latest.json?t=${Date.now()}`)).arrayBuffer())
+    const f = feed()
+    if (!f) throw new Error('No update source configured')
+    const bust = (url: string): string => (f.bust ? `${url}?t=${Date.now()}` : url)
+    const raw = Buffer.from(await (await fetchWithTimeout(bust(`${f.base}latest.json`))).arrayBuffer())
     let claimed = ''
     try {
       claimed = String((JSON.parse(raw.toString('utf8')) as { version?: unknown }).version ?? '')
@@ -222,9 +377,9 @@ class Updater {
     let sig: string
     try {
       if (!/^\d+\.\d+\.\d+[0-9A-Za-z.+-]*$/.test(claimed)) throw new Error('bad version')
-      sig = await (await fetchWithTimeout(`${base}versions/${claimed}.json.sig`)).text()
+      sig = await (await fetchWithTimeout(f.versionSig(claimed))).text()
     } catch {
-      sig = await (await fetchWithTimeout(`${base}latest.json.sig?t=${Date.now()}`)).text()
+      sig = await (await fetchWithTimeout(bust(`${f.base}latest.json.sig`))).text()
     }
     return verifyManifest(raw, sig)
   }
@@ -234,10 +389,6 @@ class Updater {
     if (m.bootstrapApi > bootstrapApi()) return false
     if (!m.files.length) return false
     return !readHotState().failed?.includes(m.version)
-  }
-
-  private fullPackage() {
-    return this.manifest?.full?.[`${process.platform}-${process.arch}`]
   }
 
   /** Download what the user asked for: the delta when possible, else the installer. */
@@ -301,7 +452,7 @@ class Updater {
     const queue = [...toDownload]
     const worker = async () => {
       for (let f = queue.shift(); f; f = queue.shift()) {
-        const gz = await fetchBuffer(resolveUrl(`files/${f.sha256}.gz`), (n) => {
+        const gz = await fetchBuffer(resolveUrl(f.url ?? `files/${f.sha256}.gz`), (n) => {
           downloaded += n
           if (Date.now() - lastEmit > 150) {
             lastEmit = Date.now()
@@ -340,10 +491,17 @@ class Updater {
   }
 
   private async downloadFull(): Promise<void> {
-    const pkg = this.fullPackage()
-    if (!pkg) throw new Error(`No installer for ${process.platform}-${process.arch}`)
-    const dest = join(process.env['MARKFLOW_DOWNLOAD_DIR'] || app.getPath('downloads'), basename(pkg.name || pkg.url))
+    const picked = this.manifest ? pickFull(this.manifest) : null
+    if (!picked) throw new Error(`No installer for ${process.platform}-${process.arch}`)
+    const { pkg, mode } = picked
+    const auto = mode === 'mac-app' || mode === 'nsis' || mode === 'appimage'
+    // Packages installed by the updater stay in userData; the others go where the user finds them.
+    const dir = auto ? join(updatesDir(), 'full') : process.env['MARKFLOW_DOWNLOAD_DIR'] || app.getPath('downloads')
+    if (auto) await fs.rm(dir, { recursive: true, force: true })
+    await fs.mkdir(dir, { recursive: true })
+    const dest = join(dir, basename(pkg.name || pkg.url))
     const partial = dest + '.download'
+    this.fullReady = null
     this.set({ status: 'full-downloading', total: pkg.size, downloaded: 0, error: undefined })
     const res = await net.fetch(resolveUrl(pkg.url))
     if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
@@ -373,18 +531,35 @@ class Updater {
     }
     await fs.rm(dest, { force: true })
     await fs.rename(partial, dest)
-    if (process.platform === 'linux' && dest.endsWith('.AppImage')) await fs.chmod(dest, 0o755)
-    this.set({ status: 'full-ready', downloaded, installerPath: dest })
+
+    let installPath = dest
+    if (mode === 'mac-app') {
+      // Unpack now so the swap after quitting is just two renames.
+      const unpacked = join(dir, 'app')
+      await run('/usr/bin/ditto', ['-x', '-k', dest, unpacked])
+      const bundle = (await fs.readdir(unpacked)).find((n) => n.endsWith('.app'))
+      if (!bundle || !existsSync(join(unpacked, bundle, 'Contents/Info.plist'))) throw new Error('The update package has no app')
+      await fs.rm(dest, { force: true })
+      installPath = join(unpacked, bundle)
+    } else if (mode === 'appimage' || (process.platform === 'linux' && dest.endsWith('.AppImage'))) {
+      await fs.chmod(dest, 0o755)
+    }
+    if (auto) this.fullReady = { mode, path: installPath }
+    this.set({ status: 'full-ready', downloaded, installerPath: auto ? undefined : dest, autoInstall: auto })
   }
 
-  /** Apply a downloaded update: restart into the hot version, or hand over to the installer. */
+  /** Apply a downloaded update: restart into the hot version or the new package, or hand over the installer. */
   async install(): Promise<void> {
     if (this.state.status === 'ready') {
       this.relaunchOnQuit = true
       app.quit()
+    } else if (this.state.status === 'full-ready' && this.fullReady) {
+      // Installed from will-quit, once every window agreed to close (unsaved changes can cancel it).
+      this.installOnQuit = true
+      app.quit()
     } else if (this.state.status === 'full-ready' && this.state.installerPath) {
       const path = this.state.installerPath
-      if (process.platform === 'linux') {
+      if (process.platform === 'linux' && !path.endsWith('.deb')) {
         shell.showItemInFolder(path)
         return
       }
@@ -395,12 +570,44 @@ class Updater {
     }
   }
 
-  shouldRelaunch(): boolean {
-    return this.relaunchOnQuit
+  /** Called from will-quit: relaunch into a hot update or start installing the full package. */
+  applyOnQuit(): void {
+    if (this.relaunchOnQuit) {
+      app.relaunch()
+      return
+    }
+    const full = this.fullReady
+    if (!this.installOnQuit || !full) return
+    try {
+      if (full.mode === 'nsis') {
+        // --updated keeps the install location and mode; --force-run starts the new version.
+        spawn(full.path, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore' }).unref()
+      } else if (full.mode === 'mac-app') {
+        const bundle = macBundle()
+        if (!bundle) throw new Error('The app folder is not writable')
+        spawn('/bin/sh', ['-c', MAC_SWAP_SCRIPT, 'markflow-update', String(process.pid), bundle, full.path], {
+          detached: true,
+          stdio: 'ignore'
+        }).unref()
+      } else if (full.mode === 'appimage') {
+        const target = appImagePath()
+        if (!target) throw new Error('The AppImage folder is not writable')
+        // Renaming over the running AppImage is safe: the mounted image keeps the old inode.
+        const tmp = join(dirname(target), `.${basename(target)}.update`)
+        copyFileSync(full.path, tmp)
+        chmodSync(tmp, 0o755)
+        renameSync(tmp, target)
+        rmSync(full.path, { force: true })
+        app.relaunch({ execPath: target, args: [] })
+      }
+    } catch (err) {
+      console.error('[updater] could not install the update', err)
+    }
   }
 
   cancelRelaunch(): void {
     this.relaunchOnQuit = false
+    this.installOnQuit = false
   }
 
   /** Called once the UI is up: the running hot version booted fine; tidy old versions. */
@@ -416,6 +623,7 @@ class Updater {
       for (const name of await fs.readdir(updatesDir())) {
         if (name === 'state.json' || keep.has(name)) continue
         if (name.endsWith('.partial') && this.busy) continue
+        if (name === 'full' && (this.busy || this.fullReady)) continue
         await fs.rm(join(updatesDir(), name), { recursive: true, force: true })
       }
     } catch {

@@ -34,7 +34,9 @@ export function describeUpdate(u: UpdateState, t: TFunction): string {
     case 'full-available':
       return t('update.fullAvailable', { version: u.latestVersion ?? '' })
     case 'full-ready':
-      return t('update.fullReady', { path: u.installerPath ?? '' })
+      return u.autoInstall
+        ? t('update.fullReadyAuto', { version: u.latestVersion ?? '' })
+        : t('update.fullReady', { path: u.installerPath ?? '' })
     case 'error':
       return t('update.error', { msg: u.error ?? '' })
     default:
@@ -109,7 +111,7 @@ export function UpdatePanel() {
           )}
           {u.status === 'full-ready' && (
             <button className="btn primary" onClick={() => void window.mf.installUpdate()}>
-              {t('update.openInstaller')}
+              {u.autoInstall ? t('update.installRestart') : t('update.openInstaller')}
             </button>
           )}
         </div>
@@ -126,13 +128,14 @@ export function UpdatePanel() {
             type="text"
             defaultValue={updateUrl}
             key={updateUrl}
-            placeholder={t('update.serverPlaceholder')}
+            placeholder={t('update.serverPlaceholder', { source: u.source ?? 'GitHub Releases' })}
             spellCheck={false}
             onBlur={(e) => e.target.value.trim() !== updateUrl && void updateSettings({ updateUrl: e.target.value.trim() })}
             onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
           />
         </span>
       </label>
+      <p className="setting-desc small">{t('update.serverHint')}</p>
     </>
   )
 }

@@ -1,5 +1,7 @@
 # MarkFlow 更新服务器：要求与部署
 
+> 默认情况下，MarkFlow 从 GitHub Releases 获取更新，发版由 CI 自动完成（见 README「自动更新」一节），不需要自建服务器。本文只适用于想自己托管更新的情况，例如 GitHub 在用户所在网络中访问不稳定。
+
 MarkFlow 的更新服务器就是一个**只读的静态文件目录**。不需要后端程序、数据库或登录，只要能通过 HTTP(S) 下载文件就行。下面先说明它需要满足的要求，再给出四种部署方式，以及每次发版的操作步骤。
 
 ---
@@ -142,7 +144,6 @@ node scripts/verify-update-server.mjs <更新地址>
 
 - `release:update` 会打印本次更新需要下载的大小，例如 `update from 1.0.0: 1 changed files, 0.03 MB`。
 - 一直使用同一个 `release/update/` 目录：文件按哈希去重，旧版本的文件也会保留，正在更新中的客户端不受影响。
-- CI 中的 `update-feed` 任务会自动生成这个目录。它需要在 GitHub 仓库的 Secrets 中配置 `MARKFLOW_UPDATE_KEY`，值为 `keys/update-private.pem` 的内容。
 
 ### 回滚
 
@@ -159,6 +160,7 @@ node scripts/verify-update-server.mjs <更新地址>
 1. 环境变量 `MARKFLOW_UPDATE_URL`（用于测试）
 2. 应用内「设置 → 更新 → 更新服务器地址」（只对当前用户生效）
 3. `package.json` 中的 `"markflow": { "updateUrl": "https://updates.example.com/markflow/" }`。这个地址会打包进安装包，作为默认值
+4. `package.json` 中的 `"markflow": { "github": "owner/repo" }`：以上都没设置时，使用这个仓库的 GitHub Releases
 
 正式发布前，先在第 3 项填好地址，然后重新打安装包分发出去。之后的版本都可以通过增量更新送达。
 
@@ -193,7 +195,7 @@ node ../scripts/verify-update-server.mjs http://127.0.0.1:8088/markflow/
 
 | 现象（应用内提示） | 原因与处理 |
 | --- | --- |
-| 尚未配置更新服务器地址 | 第 4 节的三个地方都没有设置地址 |
+| 尚未配置更新服务器地址 | 第 4 节的四个地方都没有设置 |
 | HTTP 404 …/latest.json | 地址缺少 `/markflow/` 前缀，或者文件没有上传到对应目录 |
 | Update manifest signature is invalid | 用错了私钥签名；或者 `latest.json` 在上传后被修改过，比如 CDN 做了格式化。用 `deploy-update.mjs` 重新上传 |
 | Checksum mismatch | CDN 或服务器改动了 `.gz` 文件（例如图片压缩或格式转换）。关闭相关优化后，运行 `verify-update-server.mjs` 确认 |
