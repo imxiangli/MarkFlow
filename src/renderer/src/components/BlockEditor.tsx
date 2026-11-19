@@ -3,6 +3,7 @@ import { EditorSelection, EditorState, Prec } from '@codemirror/state'
 import { EditorView, drawSelection, keymap, placeholder as cmPlaceholder } from '@codemirror/view'
 import { history } from '@codemirror/commands'
 import { syntaxHighlighting } from '@codemirror/language'
+import { editorContextMenu } from '@/editor/contextMenu'
 import { findExtensions } from '@/editor/findPanel'
 import { markdownPaste } from '@/editor/paste'
 import { languageFor, markdownHighlight } from '@/editor/setup'
@@ -70,6 +71,7 @@ export function BlockEditor({ initial, cursor, onDone, textRef }: Props) {
           inlineTheme,
           cmPlaceholder(t('block.placeholder')),
           markdownPaste(),
+          editorContextMenu,
           findExtensions,
           sublimeKeymap(window.mf.platform),
           baseKeymap(window.mf.platform)

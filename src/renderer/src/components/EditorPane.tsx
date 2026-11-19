@@ -21,6 +21,7 @@ import {
 import { openFile, updateContent } from '@/actions'
 import { editorBridge } from '@/editor/bridge'
 import type { FormatCommand } from '@/editor/commands'
+import { editorContextMenu } from '@/editor/contextMenu'
 import { markdownPaste } from '@/editor/paste'
 import { createEditorState, settingsEffects, tabLanguageExtension } from '@/editor/setup'
 import { t, useT } from '@/lib/i18n'
@@ -152,7 +153,7 @@ function makeState(tab: Tab): EditorState {
   const doc = tab.large ? (largeDocs.get(tab.id) ?? '') : tab.content
   largeDocs.delete(tab.id)
   const language = tabLanguageExtension(tab, tab.large ? '' : tab.content, (ext) => editorBridge.setLanguage(tab.id, ext))
-  return createEditorState(doc, language, getState().settings, { extensions: [listeners, pasteHandler, editorEvents] }, { large: tab.large })
+  return createEditorState(doc, language, getState().settings, { extensions: [listeners, pasteHandler, editorEvents, editorContextMenu] }, { large: tab.large })
 }
 
 interface ToolItem {

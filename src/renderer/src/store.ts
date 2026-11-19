@@ -113,6 +113,8 @@ export interface AppState {
   findOpen: boolean
   aboutOpen: boolean
   searchFocusSeq: number
+  /** Text to put in the folder search field the next time it is focused. */
+  searchSeed: string | null
   toasts: Toast[]
   reveal: RevealRequest | null
   viewer: ViewerContent | null
@@ -159,6 +161,7 @@ export const useStore = create<AppState>(() => ({
   findOpen: false,
   aboutOpen: false,
   searchFocusSeq: 0,
+  searchSeed: null,
   toasts: [],
   reveal: null,
   viewer: null

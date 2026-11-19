@@ -399,6 +399,10 @@ export interface MarkFlowAPI {
   openPath(path: string): Promise<string>
   copyText(text: string): void
   readClipboardText(): Promise<string>
+  /** Native cut / copy / paste on the focused element (fires the real clipboard events). */
+  editAction(action: 'cut' | 'copy' | 'paste'): void
+  /** Put an image (data:, http(s): or asset URL) on the clipboard. */
+  copyImage(src: string): Promise<void>
   setFullScreen(flag: boolean): void
   onFullScreen(cb: (full: boolean) => void): () => void
   /** A complete two-stroke shortcut, e.g. "Cmd+K Cmd+U". */

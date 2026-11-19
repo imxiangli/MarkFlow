@@ -1,8 +1,8 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, net, shell, type IpcMainInvokeEvent } from 'electron'
 import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, extname, join, basename } from 'node:path'
-import { ENCODING_LABELS, MARKDOWN_EXTENSIONS, isBinaryFile } from '@shared/constants'
+import { ASSET_SCHEME, ENCODING_LABELS, MARKDOWN_EXTENSIONS, isBinaryFile } from '@shared/constants'
 import type { FileData, LineEnding, MessageBoxOptions, ScanOptions, SearchOptions, SessionState, Settings, TextEncoding, WriteOptions } from '@shared/types'
 import { claimStartupBackups, deleteBackups, stashBackups, writeBackup } from './backups'
 import { setAsDefaultMarkdownApp } from './default-app'
@@ -338,6 +338,24 @@ export function registerIpc(): void {
     if (typeof text === 'string') clipboard.writeText(text)
   })
   ipcMain.handle('mf:read-clipboard', () => clipboard.readText())
+  ipcMain.on('mf:edit-action', (e, action: unknown) => {
+    if (action === 'cut') e.sender.cut()
+    else if (action === 'copy') e.sender.copy()
+    else if (action === 'paste') e.sender.paste()
+  })
+  ipcMain.handle('mf:copy-image', async (_e, src: unknown) => {
+    const url = str(src, 'src')
+    let image: Electron.NativeImage
+    if (url.startsWith('data:')) image = nativeImage.createFromDataURL(url)
+    else {
+      if (!/^https?:/i.test(url) && !url.startsWith(`${ASSET_SCHEME}:`)) throw new Error('Blocked URL scheme')
+      const res = await net.fetch(url)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      image = nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()))
+    }
+    if (image.isEmpty()) throw new Error('Unsupported image')
+    clipboard.writeImage(image)
+  })
   ipcMain.on('mf:set-fullscreen', (e, flag: unknown) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     if (win && !win.isDestroyed()) win.setFullScreen(!!flag)

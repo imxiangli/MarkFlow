@@ -995,6 +995,12 @@ export function toggleSidebar(panel?: 'files' | 'outline' | 'search'): void {
   })
 }
 
+/** Open the folder search with `text` as the query. */
+export function searchInFolderFor(text: string): void {
+  setState({ searchSeed: text })
+  toggleSidebar('search')
+}
+
 export async function setDefaultApp(): Promise<void> {
   const r = await api.setDefaultApp()
   if (r.ok) toast(r.action === 'windows-settings' ? t('toast.defaultAppWindows') : t('toast.defaultAppSet'), 'success', 5000)

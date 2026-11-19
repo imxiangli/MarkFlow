@@ -4,7 +4,7 @@ import type { SearchFileResult } from '@shared/types'
 import { openFile } from '@/actions'
 import { useT } from '@/lib/i18n'
 import { basename, dirname, relative } from '@/lib/path'
-import { useStore } from '@/store'
+import { getState, setState, useStore } from '@/store'
 
 export function SearchPanel() {
   const t = useT()
@@ -20,6 +20,11 @@ export function SearchPanel() {
   const seq = useRef(0)
 
   useEffect(() => {
+    const seed = getState().searchSeed
+    if (seed !== null) {
+      setState({ searchSeed: null })
+      setQuery(seed)
+    }
     inputRef.current?.focus()
     inputRef.current?.select()
   }, [focusSeq])

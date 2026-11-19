@@ -19,6 +19,9 @@ import { patchPreview, renderPendingDiagrams, type SourceBlock } from '@/markdow
 import type { DiagramContext } from '@/markdown/diagrams'
 import { activeTab, getState, resolvedTheme, setState, toast, useStore } from '@/store'
 import { BlockEditor } from './BlockEditor'
+import { openContextMenu, type MenuItem } from './ContextMenu'
+import { clipboardKey, copyImage, revealLabel } from '@/editor/contextMenu'
+import { ASSET_SCHEME } from '@shared/constants'
 
 const scrollPositions = new Map<string, number>()
 /** Per tab: start lines of blocks currently shown as Markdown source. */
@@ -67,6 +70,18 @@ function topBlockOf(node: Element | null, body: HTMLElement | null): HTMLElement
 
 function blockStartOf(el: HTMLElement): number {
   return Number(el.getAttribute('data-block-start') ?? el.getAttribute('data-source-of'))
+}
+
+/** Local file behind a preview image URL (mf-asset://local/…), or null for remote / inline images. */
+function assetPath(src: string): string | null {
+  const prefix = `${ASSET_SCHEME}://local`
+  if (!src.startsWith(prefix)) return null
+  try {
+    const p = decodeURIComponent(new URL(src).pathname)
+    return /^\/[a-zA-Z]:/.test(p) ? p.slice(1) : p
+  } catch {
+    return null
+  }
 }
 
 /** Best guess of where in the block source the user double-clicked. */
@@ -502,6 +517,85 @@ export function Preview({ visible }: { visible: boolean }) {
     if (block) startEdit(blockStartOf(block), { x: e.clientX, y: e.clientY })
   }
 
+  const onContextMenu = (e: React.MouseEvent) => {
+    const body = bodyRef.current
+    const target = e.target as HTMLElement
+    const tabNow = activeTab()
+    if (!body || !tabNow || target.closest('.mf-block-editor-host, .block-tools')) return
+    const copied = (text: string) => {
+      window.mf.copyText(text)
+      toast(t('toast.copied'), 'success', 1500)
+    }
+    const items: MenuItem[] = []
+
+    const link = target.closest<HTMLAnchorElement>('a[href]:not(.mf-anchor)')
+    if (link && body.contains(link)) {
+      const wiki = link.getAttribute('data-wikilink')
+      const href = link.getAttribute('href') ?? ''
+      if (wiki !== null) items.push({ label: t('ctx.openPage', { name: wiki }), onClick: () => void openWikilink(wiki) })
+      else
+        items.push(
+          { label: t('ctx.openLink'), onClick: () => void followLink(href).catch((err) => toast(String(err?.message ?? err), 'error')) },
+          { label: t('ctx.copyLink'), onClick: () => copied(href) }
+        )
+      items.push({ separator: true })
+    }
+
+    const img = target.closest<HTMLImageElement>('img')
+    const diagram = target.closest('.mf-diagram')
+    if (diagram) items.push({ label: t('block.zoom'), onClick: () => zoomInto(diagram) }, { separator: true })
+    else if (img) {
+      const src = img.currentSrc || img.src
+      const path = assetPath(src)
+      items.push(
+        { label: t('block.zoom'), onClick: () => zoomInto(img) },
+        { label: t('ctx.copyImage'), onClick: () => void copyImage(src) },
+        { label: t('ctx.copyImageAddress'), onClick: () => copied(path ?? img.getAttribute('src') ?? src) },
+        ...(path ? [{ label: revealLabel(), onClick: () => window.mf.showItemInFolder(path) }] : []),
+        { separator: true }
+      )
+    }
+
+    const pre = target.closest('pre')
+    const code = pre?.querySelector('code')
+    if (code && !diagram) items.push({ label: t('ctx.copyCode'), onClick: () => copied((code.textContent ?? '').replace(/\n$/, '')) }, { separator: true })
+
+    const heading = target.closest<HTMLElement>('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]')
+    if (heading) items.push({ label: t('ctx.copyAnchor'), onClick: () => copied(`#${heading.id}`) }, { separator: true })
+
+    const sel = window.getSelection()
+    const hasSelection = !!sel && !sel.isCollapsed && !!sel.anchorNode && body.contains(sel.anchorNode)
+    items.push(
+      { label: t('menu.copy'), shortcut: clipboardKey('C'), disabled: !hasSelection, onClick: () => window.mf.editAction('copy') },
+      {
+        label: t('menu.selectAll'),
+        shortcut: clipboardKey('A'),
+        onClick: () => {
+          const range = document.createRange()
+          range.selectNodeContents(body)
+          window.getSelection()?.removeAllRanges()
+          window.getSelection()?.addRange(range)
+        }
+      }
+    )
+
+    const block = tabNow.kind === 'markdown' ? topBlockOf(target, body) : null
+    if (block && !editingRef.current) {
+      const start = blockStartOf(block)
+      const mode = getState().viewMode
+      const shown = !!sourceToggles.get(tabNow.id)?.has(start)
+      items.push(
+        { separator: true },
+        mode === 'preview'
+          ? { label: t('ctx.editBlock'), onClick: () => startEdit(start) }
+          : { label: t('block.jump'), onClick: () => editorBridge.revealLine(start, { focus: true }) },
+        { label: t(shown ? 'block.rendered' : 'block.source'), onClick: () => toggleSource(start) },
+        { label: t('block.copy'), onClick: () => copied(blockSource(start)) }
+      )
+    }
+    openContextMenu(e, items)
+  }
+
   const width = useStore((s) => s.settings.previewWidth)
   const fontSize = useStore((s) => s.settings.previewFontSize)
   const fontFamily = useStore((s) => s.settings.previewFontFamily)
@@ -531,6 +625,7 @@ export function Preview({ visible }: { visible: boolean }) {
         }}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
       />
       {canEdit && !editing && (
         <div className="preview-add-wrap">
