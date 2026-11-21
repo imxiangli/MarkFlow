@@ -104,7 +104,8 @@ export function activate(id: string): void {
   setState({ activeId: id })
 }
 
-function insertTab(tab: Tab): void {
+// Opened files go right after the active tab; a new blank file goes at the end.
+function insertTab(tab: Tab, atEnd = false): void {
   const s = getState()
   const active = activeTab(s)
   const replaceable =
@@ -114,7 +115,7 @@ function insertTab(tab: Tab): void {
     tabs = s.tabs.map((x) => (x.id === replaceable.id ? tab : x))
     editorBridge.drop(replaceable.id)
   } else {
-    const idx = active ? s.tabs.indexOf(active) : s.tabs.length - 1
+    const idx = active && !atEnd ? s.tabs.indexOf(active) : s.tabs.length - 1
     tabs = [...s.tabs.slice(0, idx + 1), tab, ...s.tabs.slice(idx + 1)]
   }
   if (!replaceable) recordJump()
@@ -260,7 +261,8 @@ export function newUntitled(
   content = '',
   name?: string,
   builtin = false,
-  type: Pick<Tab, 'kind' | 'language' | 'autoType'> = { kind: 'markdown' }
+  type: Pick<Tab, 'kind' | 'language' | 'autoType'> = { kind: 'markdown' },
+  atEnd = false
 ): Tab {
   // Keep numbering past restored "Untitled-N" documents, whatever their type.
   const n = name ? /-(\d+)(?:\.[^.]*)?$/.exec(name) : null
@@ -277,13 +279,13 @@ export function newUntitled(
     deleted: false,
     builtin
   }
-  insertTab(tab)
+  insertTab(tab, atEnd)
   return tab
 }
 
 export function newFile(): void {
   // Starts as Markdown, but its type follows what's typed or pasted until one is chosen.
-  newUntitled('', undefined, false, { kind: 'markdown', autoType: true })
+  newUntitled('', undefined, false, { kind: 'markdown', autoType: true }, true)
   const s = getState()
   if (s.viewMode === 'preview') setViewMode(s.lastEditMode)
   setTimeout(() => editorBridge.focus(), 50)
