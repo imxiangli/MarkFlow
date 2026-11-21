@@ -11,10 +11,13 @@ import { highlightTree, type Highlighter } from '@lezer/highlight'
  * The picture is the editor's own height map scaled by `s` (one text row = ROW px), so
  * wrapped lines, headings and folds take the same relative room as in the editor. When the
  * scaled document is taller than the editor, the minimap itself scrolls in proportion.
+ *
+ * Like Sublime, it sits inside the scroller's right padding, left of the vertical scrollbar.
  */
 
 /** Width of the minimap in CSS pixels. */
-const WIDTH = 100
+export const MINIMAP_WIDTH = 100
+const WIDTH = MINIMAP_WIDTH
 /** Height of one row of text in the minimap. */
 const ROW = 3
 /** Below this editor width the minimap would crowd the text, so it is hidden. */
@@ -25,6 +28,8 @@ const MAX_CHARS = 2000
 interface Metrics {
   hidden: boolean
   top: number
+  /** Width of the scroller's vertical scrollbar. */
+  right: number
   height: number
   scrollTop: number
   scrollHeight: number
@@ -82,6 +87,7 @@ class Minimap {
   private slider: HTMLElement
   private probe: HTMLElement
   private metrics: Metrics | null = null
+  visible = false
   private colors = new Map<string, string>()
   private colorTheme = ''
   private drag: { startY: number; startScroll: number; ratio: number } | null = null
@@ -127,7 +133,8 @@ class Minimap {
 
   destroy(): void {
     this.view.scrollDOM.removeEventListener('scroll', this.onScroll)
-    this.view.scrollDOM.style.marginRight = ''
+    this.view.scrollDOM.style.paddingRight = ''
+    this.view.scrollDOM.removeAttribute('data-minimap')
     this.themeObserver.disconnect()
     this.dom.remove()
   }
@@ -153,6 +160,7 @@ class Minimap {
     const m: Metrics = {
       hidden,
       top: sd.offsetTop,
+      right: Math.max(0, sd.offsetWidth - sd.clientWidth),
       height: sd.clientHeight,
       scrollTop: sd.scrollTop,
       scrollHeight: sd.scrollHeight,
@@ -217,10 +225,15 @@ class Minimap {
 
   private write(m: Metrics): void {
     this.metrics = m
+    this.visible = !m.hidden
     this.dom.style.display = m.hidden ? 'none' : ''
-    this.view.scrollDOM.style.marginRight = m.hidden ? '' : `${WIDTH}px`
+    // Room for the minimap inside the scroller, so the scrollbar stays at the far right.
+    this.view.scrollDOM.style.paddingRight = m.hidden ? '' : `${WIDTH}px`
+    // Unwrapped lines overflow the content instead and make room themselves (setup.ts).
+    this.view.scrollDOM.toggleAttribute('data-minimap', !m.hidden)
     if (m.hidden) return
     this.dom.style.top = `${m.top}px`
+    this.dom.style.right = `${m.right}px`
     this.dom.style.height = `${m.height}px`
 
     const offset = m.offset
@@ -387,6 +400,8 @@ const minimapTheme = EditorView.baseTheme({
     width: `${WIDTH}px`,
     overflow: 'hidden',
     zIndex: '2',
+    // Unwrapped lines scroll horizontally beneath it.
+    backgroundColor: 'var(--editor-bg)',
     cursor: 'default',
     userSelect: 'none',
     touchAction: 'none'
@@ -406,5 +421,9 @@ const minimapTheme = EditorView.baseTheme({
 
 /** The minimap, coloured with the editor's syntax highlighter. */
 export function minimap(highlighter: Highlighter): Extension {
-  return [ViewPlugin.define((view) => new Minimap(view, highlighter)), minimapTheme]
+  const plugin = ViewPlugin.define((view) => new Minimap(view, highlighter), {
+    // Keep the cursor clear of the minimap when scrolling it into view.
+    provide: (p) => EditorView.scrollMargins.of((view) => (view.plugin(p)?.visible ? { right: WIDTH } : null))
+  })
+  return [plugin, minimapTheme]
 }

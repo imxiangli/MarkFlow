@@ -69,7 +69,7 @@ const state = () =>
   page.evaluate(() => {
     const mm = document.querySelector('.pane-editor .cm-minimap')
     const sd = document.querySelector('.pane-editor .cm-scroller')
-    if (!mm || mm.style.display === 'none') return { visible: false, scrollTop: sd.scrollTop, margin: sd.style.marginRight }
+    if (!mm || mm.style.display === 'none') return { visible: false, scrollTop: sd.scrollTop, padding: sd.style.paddingRight }
     const r = mm.getBoundingClientRect()
     const s = mm.querySelector('.cm-minimap-slider')
     const canvas = mm.querySelector('canvas')
@@ -85,8 +85,11 @@ const state = () =>
       scrollTop: sd.scrollTop,
       maxScroll: sd.scrollHeight - sd.clientHeight,
       clientHeight: sd.clientHeight,
+      scrollbarLeft: sd.getBoundingClientRect().left + sd.clientLeft + sd.clientWidth,
+      scrollbarWidth: sd.offsetWidth - sd.clientWidth,
       scrollerRight: sd.getBoundingClientRect().right,
-      margin: sd.style.marginRight
+      contentRight: Math.max(...[...sd.querySelectorAll('.cm-line')].map((l) => l.getBoundingClientRect().right)),
+      padding: sd.style.paddingRight
     }
   })
 
@@ -106,7 +109,9 @@ try {
   let s = await state()
   check(s.visible, 'minimap is shown next to the editor')
   check(near(s.rect.width, 100, 1), `minimap is 100px wide (${s.rect.width})`)
-  check(s.scrollerRight <= s.rect.x + 1, 'editor text area ends where the minimap starts')
+  check(s.scrollbarWidth > 0 && near(s.rect.x + s.rect.width, s.scrollbarLeft, 1), `minimap sits left of the scrollbar (${s.rect.x + s.rect.width} / ${s.scrollbarLeft})`)
+  check(near(s.scrollbarLeft + s.scrollbarWidth, s.scrollerRight, 1), 'scrollbar is at the far right')
+  check(s.contentRight <= s.rect.x + 1, `wrapped text ends where the minimap starts (${s.contentRight} / ${s.rect.x})`)
   check(s.inked > 500, `document is drawn on the minimap (${s.inked} pixels)`)
   check(s.sliderTop === 0 && s.sliderHeight > 20, `slider marks the top of the document (${s.sliderTop}, ${s.sliderHeight}px)`)
   await shot('minimap-short')
@@ -163,7 +168,7 @@ try {
   await sleep(200)
   s = await state()
   check(s.sliderTop === 0, `slider starts at the top (${s.sliderTop}, scrollTop ${s.scrollTop}, long ${isLong})`)
-  await drag(s.rect.x + 50, s.rect.y + s.sliderTop + 10, s.rect.y + s.rect.height + 200)
+  await drag(s.rect.x + 50, s.rect.y + s.sliderTop + 10, s.rect.y + s.rect.height - 2)
   after = await state()
   check(near(after.scrollTop, after.maxScroll, 2), `dragging the slider to the bottom reaches the end (${after.scrollTop} / ${after.maxScroll})`)
   check(near(after.sliderTop + after.sliderHeight, s.rect.height, 2), 'slider sits at the bottom of the minimap')
@@ -177,11 +182,34 @@ try {
   await send('toggle-minimap')
   await sleep(300)
   s = await state()
-  check(!s.visible && s.margin === '', 'View › Show/Hide Minimap hides it and gives the room back')
+  check(!s.visible && s.padding === '', 'View › Show/Hide Minimap hides it and gives the room back')
   await send('toggle-minimap')
   await page.waitForSelector('.pane-editor .cm-minimap canvas', { timeout: 3000 })
   await sleep(200)
   check((await state()).visible, 'and shows it again')
+
+  console.log('Unwrapped lines')
+  await send('settings')
+  await page.click('.settings-nav button:has-text("Editor")')
+  await page.click('.setting-row.check:has-text("Wrap lines") input')
+  await page.keyboard.press('Escape')
+  await sleep(300)
+  await page.evaluate(() => {
+    const v = document.querySelector('.pane-editor .cm-content').cmTile.root.view
+    const text = 'start ' + 'word '.repeat(300) + 'END'
+    v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text }, selection: { anchor: text.length }, scrollIntoView: true })
+    v.focus()
+    return null
+  })
+  await sleep(300)
+  s = await state()
+  const end = await page.evaluate(() => {
+    const v = document.querySelector('.pane-editor .cm-content').cmTile.root.view
+    return { x: v.coordsAtPos(v.state.doc.length).right, scrollLeft: v.scrollDOM.scrollLeft }
+  })
+  check(end.scrollLeft > 0 && end.x <= s.rect.x, `cursor at the end of a long line stays left of the minimap (${end.x} / ${s.rect.x})`)
+  check(near(s.rect.x + s.rect.width, s.scrollbarLeft, 1), 'minimap still left of the scrollbar')
+  await shot('minimap-nowrap')
 
   console.log('Narrow editor')
   await send('view-split')

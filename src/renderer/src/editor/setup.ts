@@ -27,7 +27,7 @@ import type { TabKind } from '@/store'
 import { baseKeymap, sublimeKeymap } from './keymap'
 import { findExtensions } from './findPanel'
 import { languageExtension, tabLanguage } from './languages'
-import { minimap } from './minimap'
+import { MINIMAP_WIDTH, minimap } from './minimap'
 import { bookmarks } from './sublime'
 
 export const compartments = {
@@ -78,6 +78,13 @@ const baseTheme = EditorView.theme({
   '.cm-scroller': { lineHeight: '1.7', overflowX: 'auto' },
   '.cm-content': { padding: '18px 0 40vh', caretColor: 'var(--accent)', maxWidth: '100%' },
   '.cm-line': { padding: '0 24px 0 16px' },
+  // Unwrapped lines overflow their box, so padding doesn't count: a spacer after the text lets
+  // the end of a long line scroll out from under the minimap.
+  '.cm-scroller[data-minimap] .cm-content:not(.cm-lineWrapping) .cm-line::after': {
+    content: "''",
+    display: 'inline-block',
+    width: `${MINIMAP_WIDTH}px`
+  },
   '.cm-gutters': {
     backgroundColor: 'var(--editor-bg)',
     color: 'var(--text-faint)',
