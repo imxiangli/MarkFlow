@@ -32,6 +32,7 @@
     "test:paste-e2e": "node tests/paste-e2e.mjs",
     "test:find": "node tests/find-e2e.mjs",
     "test:context-menu": "node tests/context-menu-e2e.mjs",
+    "test:minimap": "node tests/minimap-e2e.mjs",
     "icons": "node scripts/gen-icons.mjs",
     "docs:shortcuts": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/gen-shortcuts.mjs",
     "postinstall": "node scripts/postinstall.mjs",

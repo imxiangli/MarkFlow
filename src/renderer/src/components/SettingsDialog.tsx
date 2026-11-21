@@ -174,6 +174,7 @@ export function SettingsDialog() {
               </Row>
               <Toggle k="lineNumbers" label={t('settings.lineNumbers')} />
               <Toggle k="lineWrapping" label={t('settings.lineWrapping')} />
+              <Toggle k="minimap" label={t('settings.minimap')} />
               <Toggle k="autoSave" label={t('settings.autoSave')} />
               <Toggle k="syncScroll" label={t('settings.syncScroll')} />
             </>

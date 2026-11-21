@@ -18,6 +18,7 @@ export interface Settings {
   previewWidth: PreviewWidth
   lineNumbers: boolean
   lineWrapping: boolean
+  minimap: boolean
   autoSave: boolean
   syncScroll: boolean
   showAllFiles: boolean
@@ -46,6 +47,7 @@ export const DEFAULT_SETTINGS: Settings = {
   previewWidth: 'medium',
   lineNumbers: true,
   lineWrapping: true,
+  minimap: true,
   autoSave: false,
   syncScroll: true,
   showAllFiles: false,
@@ -345,6 +347,7 @@ export type MenuCommand =
   | 'bookmark-prev'
   | 'bookmark-clear'
   | 'focus-mode'
+  | 'toggle-minimap'
 
 export interface MarkFlowAPI {
   platform: Platform

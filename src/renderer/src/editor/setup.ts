@@ -27,13 +27,15 @@ import type { TabKind } from '@/store'
 import { baseKeymap, sublimeKeymap } from './keymap'
 import { findExtensions } from './findPanel'
 import { languageExtension, tabLanguage } from './languages'
+import { minimap } from './minimap'
 import { bookmarks } from './sublime'
 
 export const compartments = {
   lineNumbers: new Compartment(),
   wrap: new Compartment(),
   font: new Compartment(),
-  language: new Compartment()
+  language: new Compartment(),
+  minimap: new Compartment()
 }
 
 export const markdownHighlight = HighlightStyle.define([
@@ -65,6 +67,10 @@ export const markdownHighlight = HighlightStyle.define([
   { tag: [tags.deleted], color: 'var(--cm-invalid)' },
   { tag: tags.invalid, color: 'var(--cm-invalid)' }
 ])
+
+// One instance, so reconfiguring other settings keeps the same minimap plugin.
+const minimapExtension = minimap(markdownHighlight)
+const minimapFor = (settings: Settings): Extension => (settings.minimap ? minimapExtension : [])
 
 const baseTheme = EditorView.theme({
   '&': { height: '100%', backgroundColor: 'var(--editor-bg)', color: 'var(--text)' },
@@ -145,6 +151,7 @@ export function createEditorState(
       compartments.wrap.of(wrapFor(settings, options.large)),
       compartments.font.of(fontTheme(settings)),
       compartments.language.of(language),
+      compartments.minimap.of(minimapFor(settings)),
       highlightSpecialChars(),
       history(),
       drawSelection(),
@@ -183,6 +190,7 @@ export function settingsEffects(settings: Settings, large?: boolean) {
       settings.lineNumbers ? [lineNumbers(), highlightActiveLineGutter(), foldGutter()] : []
     ),
     compartments.wrap.reconfigure(wrapFor(settings, large)),
-    compartments.font.reconfigure(fontTheme(settings))
+    compartments.font.reconfigure(fontTheme(settings)),
+    compartments.minimap.reconfigure(minimapFor(settings))
   ]
 }

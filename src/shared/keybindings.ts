@@ -184,6 +184,7 @@ export const COMMANDS: CommandDef[] = [
   { id: 'view-edit', label: 'menu.editMode', group: 'menu.view', scope: 'global', mac: 'Alt+Cmd+2', other: 'Ctrl+Alt+2', alt: { other: ['Alt+Shift+2'] } },
   { id: 'view-split', label: 'menu.splitMode', group: 'menu.view', scope: 'global', mac: 'Alt+Cmd+3', other: 'Ctrl+Alt+3', alt: { other: ['Alt+Shift+3'] } },
   { id: 'toggle-view', label: 'menu.toggleView', group: 'menu.view', scope: 'global', mac: 'Alt+Cmd+E', other: 'Ctrl+Alt+E' },
+  { id: 'toggle-minimap', label: 'cmd.toggleMinimap', group: 'menu.view', scope: 'global' },
   { id: 'focus-mode', label: 'cmd.focusMode', group: 'menu.view', scope: 'global', mac: 'Ctrl+Shift+Cmd+F', other: 'Shift+F11' },
   { id: 'theme-system', label: 'cmd.themeSystem', group: 'menu.view', scope: 'global' },
   { id: 'theme-light', label: 'cmd.themeLight', group: 'menu.view', scope: 'global' },

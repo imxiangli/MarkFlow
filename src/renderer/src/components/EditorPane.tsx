@@ -251,7 +251,7 @@ export function EditorPane({ visible }: { visible: boolean }) {
 
   useEffect(() => {
     editorBridge.view?.dispatch({ effects: settingsEffects(settings, activeTab()?.large) })
-  }, [settings.lineNumbers, settings.lineWrapping, settings.editorFontSize, settings.editorFontFamily])
+  }, [settings.lineNumbers, settings.lineWrapping, settings.minimap, settings.editorFontSize, settings.editorFontFamily])
 
   useEffect(() => {
     if (visible) editorBridge.view?.requestMeasure()

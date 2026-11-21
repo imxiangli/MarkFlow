@@ -1436,6 +1436,8 @@ export function runMenuCommand(cmd: MenuCommand): void {
       return setViewMode('split')
     case 'toggle-view':
       return toggleViewMode()
+    case 'toggle-minimap':
+      return void updateSettings({ minimap: !getState().settings.minimap })
     case 'theme-light':
       return void updateSettings({ theme: 'light' })
     case 'theme-dark':

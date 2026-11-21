@@ -195,6 +195,7 @@ export function buildMenu(): void {
       cmd('view-edit'),
       cmd('view-split'),
       cmd('toggle-view'),
+      cmd('toggle-minimap'),
       sep,
       {
         label: mt('menu.theme'),
